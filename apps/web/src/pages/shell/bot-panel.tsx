@@ -95,6 +95,9 @@ export function CreateBotForm({
     title: string;
     description: string;
     computerMode: ComputerMode;
+    modelProvider?: string | null;
+    modelId?: string | null;
+    thinkingLevel?: ThinkingLevel | null;
   }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -104,8 +107,54 @@ export function CreateBotForm({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [computerMode, setComputerMode] = useState<ComputerMode>("team");
+  const [modelKey, setModelKey] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState("");
+  const [credentials, setCredentials] = useState<ModelCredential[]>([]);
+  const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [me, setMe] = useState<Me | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void Promise.all([rpc.models.credentials(), rpc.models.list(), rpc.me()])
+      .then(([nextCredentials, nextCatalog, nextMe]) => {
+        setCredentials(nextCredentials);
+        setCatalog(nextCatalog);
+        setMe(nextMe);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const connectedOptions = connectedModelChoices(credentials, catalog);
+  const storedModel = modelKey ? parseModelOptionKey(modelKey) : null;
+  const selectedModel = storedModel
+    ? {
+        provider: storedModel.provider,
+        modelId: resolveSelectableModelId(catalog, storedModel.provider, storedModel.modelId),
+      }
+    : null;
+  const selectedModelKey = selectedModel
+    ? modelOptionKey(selectedModel.provider, selectedModel.modelId)
+    : "";
+  const effectiveProvider = selectedModel?.provider ?? me?.defaultProvider ?? null;
+  const effectiveModelId = selectedModel?.modelId ?? me?.defaultModel ?? null;
+  const effectiveEntry =
+    effectiveProvider && effectiveModelId
+      ? catalog.find(
+          (entry) =>
+            entry.provider === effectiveProvider &&
+            resolveSelectableModelId(catalog, entry.provider, entry.id) === effectiveModelId,
+        )
+      : undefined;
+  const effectiveCredential = credentials.find(
+    (entry) => entry.provider === effectiveProvider && entry.modelId === effectiveModelId,
+  );
+  const thinkingOptions = (
+    effectiveCredential?.thinkingLevels ??
+    effectiveEntry?.thinkingLevels ??
+    []
+  ).filter((level) => level !== "off");
+  const defaultThinkingLevel = effectiveCredential?.thinkingLevel ?? "medium";
 
   async function handleSubmit() {
     if (!name.trim() || submitting) return;
@@ -117,6 +166,11 @@ export function CreateBotForm({
         title: title.trim(),
         description: description.trim(),
         computerMode,
+        modelProvider: selectedModel?.provider ?? null,
+        modelId: selectedModel?.modelId ?? null,
+        thinkingLevel: thinkingOptions.length
+          ? ((thinkingLevel || null) as ThinkingLevel | null)
+          : null,
       });
     } catch (err) {
       setError(errorText(err, t`Could not create bot`));
@@ -186,6 +240,56 @@ export function CreateBotForm({
           privateTestId="create-bot-private"
         />
       </div>
+      <label htmlFor={`${ids}-model`} className={fieldLabelClass} data-testid="create-bot-model">
+        <Trans>Model</Trans>
+        <NativeSelect
+          id={`${ids}-model`}
+          className="mt-2 w-full"
+          value={selectedModelKey}
+          onChange={(event) => {
+            setModelKey(event.target.value);
+            setThinkingLevel("");
+          }}
+        >
+          <NativeSelectOption value="">
+            {t`Space default`}
+            {me?.defaultModel
+              ? ` (${catalogLabel(catalog, me.defaultProvider, me.defaultModel) ?? me.defaultModel})`
+              : ""}
+          </NativeSelectOption>
+          {selectedModelKey &&
+          !connectedOptions.some((option) => option.key === selectedModelKey) ? (
+            <NativeSelectOption value={selectedModelKey}>
+              {selectedModel?.modelId ?? selectedModelKey}
+            </NativeSelectOption>
+          ) : null}
+          {connectedOptions.map((option) => (
+            <NativeSelectOption key={option.key} value={option.key}>
+              {option.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </label>
+      {thinkingOptions.length ? (
+        <label htmlFor={`${ids}-thinking`} className={fieldLabelClass}>
+          <Trans>Thinking</Trans>
+          <NativeSelect
+            id={`${ids}-thinking`}
+            className="mt-2 w-full"
+            value={thinkingLevel}
+            onChange={(event) => setThinkingLevel(event.target.value)}
+          >
+            <NativeSelectOption value="">
+              {t`Default (${thinkingLevelLabel(defaultThinkingLevel)})`}
+            </NativeSelectOption>
+            {thinkingOptions.map((level) => (
+              <NativeSelectOption key={level} value={level}>
+                {thinkingLevelLabel(level)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </label>
+      ) : null}
       <Button
         className="mt-5"
         disabled={!name.trim() || submitting}

@@ -65,7 +65,7 @@ vi.mock("../ScratchpadSection", () => ({ ScratchpadSection: () => null }));
 vi.mock("../KnowledgeSection", () => ({ KnowledgeSection: () => null }));
 
 import { rpc } from "../../lib/rpc";
-import { BotSettings } from "./bot-panel";
+import { BotSettings, CreateBotForm } from "./bot-panel";
 
 const longInstructions = "I".repeat(4_000);
 
@@ -266,5 +266,108 @@ describe("BotSettings description saves", () => {
       description: "Invoices",
       instructions: "Invoices",
     });
+  });
+});
+
+describe("CreateBotForm model choices", () => {
+  async function setInput(element: HTMLInputElement | HTMLSelectElement, value: string) {
+    await act(async () => {
+      const proto =
+        element instanceof HTMLSelectElement
+          ? HTMLSelectElement.prototype
+          : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(element, value);
+      element.dispatchEvent(
+        new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }),
+      );
+    });
+  }
+
+  it("submits a selected model override with create", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(rpc.models.credentials).mockResolvedValueOnce([
+      {
+        id: "cred-xai",
+        provider: "xai",
+        label: "xAI",
+        hasKey: true,
+        isDefault: true,
+        modelId: "grok-4.6",
+      },
+    ]);
+    vi.mocked(rpc.models.list).mockResolvedValueOnce([
+      {
+        provider: "xai",
+        providerName: "xAI",
+        id: "grok-4.6",
+        label: "Grok 4.6",
+        billing: "",
+      },
+    ]);
+    vi.mocked(rpc.me).mockResolvedValueOnce({
+      defaultProvider: "xai",
+      defaultModel: "grok-4.6",
+    } as never);
+
+    await act(async () => {
+      root.render(<CreateBotForm onCreate={onCreate} onCancel={() => undefined} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const nameInput = container.querySelectorAll("input")[0];
+    if (!(nameInput instanceof HTMLInputElement)) throw new Error("Missing name input");
+    await setInput(nameInput, "Nova");
+
+    const model = container.querySelector('[data-testid="create-bot-model"] select');
+    if (!(model instanceof HTMLSelectElement)) throw new Error("Missing create model select");
+    expect([...model.options].map((option) => option.value)).toContain("xai::grok-4.6");
+    await setInput(model, "xai::grok-4.6");
+
+    const createButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Create",
+    );
+    if (!(createButton instanceof HTMLButtonElement)) throw new Error("Missing create button");
+    await act(async () => {
+      createButton.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Nova",
+        modelProvider: "xai",
+        modelId: "grok-4.6",
+      }),
+    );
+  });
+
+  it("submits null model fields when keeping the space default", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    await act(async () => {
+      root.render(<CreateBotForm onCreate={onCreate} onCancel={() => undefined} />);
+    });
+    const nameInput = container.querySelectorAll("input")[0];
+    if (!(nameInput instanceof HTMLInputElement)) throw new Error("Missing name input");
+    await setInput(nameInput, "Nova");
+    const createButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Create",
+    );
+    if (!(createButton instanceof HTMLButtonElement)) throw new Error("Missing create button");
+    await act(async () => {
+      createButton.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Nova",
+        modelProvider: null,
+        modelId: null,
+        thinkingLevel: null,
+      }),
+    );
   });
 });

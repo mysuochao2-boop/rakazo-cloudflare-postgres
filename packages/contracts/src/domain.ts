@@ -298,17 +298,58 @@ export const BOT_TITLE_MAX_LENGTH = 500;
 export const BOT_DESCRIPTION_MAX_LENGTH = 4000;
 export const BOT_INSTRUCTIONS_MAX_LENGTH = 20000;
 
-export const CreateBotInput = z.object({
-  name: z.string().trim().min(1).max(BOT_NAME_MAX_LENGTH),
-  title: z.string().max(BOT_TITLE_MAX_LENGTH).default(""),
-  description: z.string().max(BOT_DESCRIPTION_MAX_LENGTH).default(""),
-  instructions: z.string().max(BOT_INSTRUCTIONS_MAX_LENGTH).default(""),
-  notifyOnFinish: z.boolean().default(true),
-  color: BotAvatarValueSchema.optional(),
-  computerMode: ComputerModeSchema.default("team"),
-  /** Idempotency key within a space (unique with spaceId). */
-  spawnKey: z.string().trim().min(1).max(120).optional(),
-});
+const BotModelOverrideFields = {
+  modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
+  modelId: z.string().trim().min(1).max(200).nullable().optional(),
+  thinkingLevel: ThinkingLevelSchema.nullable().optional(),
+};
+
+/** Provider and model id must both be set or both cleared when either is present. */
+export function botModelOverrideIssues(
+  value: {
+    modelProvider?: string | null;
+    modelId?: string | null;
+  },
+  ctx: { addIssue: (issue: { code: "custom"; message: string; path: string[] }) => void },
+) {
+  const providerProvided = value.modelProvider !== undefined;
+  const modelProvided = value.modelId !== undefined;
+  if (!providerProvided && !modelProvided) return;
+  // Reject partial shapes like `{ modelId: null }` (provider omitted) so a
+  // clear cannot succeed without updating both persisted fields.
+  if (providerProvided !== modelProvided) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Model provider and model id must both be set or both cleared",
+      path: ["modelId"],
+    });
+    return;
+  }
+  const bothNull = value.modelProvider === null && value.modelId === null;
+  const bothSet = Boolean(value.modelProvider) && Boolean(value.modelId);
+  if (!bothNull && !bothSet) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Model provider and model id must both be set or both cleared",
+      path: ["modelId"],
+    });
+  }
+}
+
+export const CreateBotInput = z
+  .object({
+    name: z.string().trim().min(1).max(BOT_NAME_MAX_LENGTH),
+    title: z.string().max(BOT_TITLE_MAX_LENGTH).default(""),
+    description: z.string().max(BOT_DESCRIPTION_MAX_LENGTH).default(""),
+    instructions: z.string().max(BOT_INSTRUCTIONS_MAX_LENGTH).default(""),
+    notifyOnFinish: z.boolean().default(true),
+    color: BotAvatarValueSchema.optional(),
+    computerMode: ComputerModeSchema.default("team"),
+    /** Idempotency key within a space (unique with spaceId). */
+    spawnKey: z.string().trim().min(1).max(120).optional(),
+    ...BotModelOverrideFields,
+  })
+  .superRefine((value, ctx) => botModelOverrideIssues(value, ctx));
 export type CreateBotInput = z.infer<typeof CreateBotInput>;
 
 export function normalizeCreateBotProfile(
@@ -337,37 +378,12 @@ export const UpdateBotInput = z
     sectionId: Id.nullable().optional(),
     voiceId: z.string().max(120).nullable().optional(),
     autoSpeak: z.boolean().optional(),
-    modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
-    modelId: z.string().trim().min(1).max(200).nullable().optional(),
-    thinkingLevel: ThinkingLevelSchema.nullable().optional(),
+    ...BotModelOverrideFields,
     teamChatAmbientEnabled: z.boolean().optional(),
     teamChatRules: z.string().max(TEAM_CHAT_RULES_MAX_LENGTH).optional(),
     disabledBuiltinTools: DisabledBuiltinToolsSchema.optional(),
   })
-  .superRefine((value, ctx) => {
-    const providerProvided = value.modelProvider !== undefined;
-    const modelProvided = value.modelId !== undefined;
-    if (!providerProvided && !modelProvided) return;
-    // Reject partial shapes like `{ modelId: null }` (provider omitted) so a
-    // clear cannot succeed without updating both persisted fields.
-    if (providerProvided !== modelProvided) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Model provider and model id must both be set or both cleared",
-        path: ["modelId"],
-      });
-      return;
-    }
-    const bothNull = value.modelProvider === null && value.modelId === null;
-    const bothSet = Boolean(value.modelProvider) && Boolean(value.modelId);
-    if (!bothNull && !bothSet) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Model provider and model id must both be set or both cleared",
-        path: ["modelId"],
-      });
-    }
-  });
+  .superRefine((value, ctx) => botModelOverrideIssues(value, ctx));
 
 /**
  * A routine's model is optional, but provider and id only mean something together,

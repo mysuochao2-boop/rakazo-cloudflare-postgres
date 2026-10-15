@@ -1535,6 +1535,7 @@ export function createRouter(deps: RouterDeps) {
         return found;
       }),
       create: authed.bots.create.handler(async ({ context, input }) => {
+        await assertBotModelOverride(deps, context.actor, input);
         let bot: Bot;
         try {
           bot = await repos.createBot(context.actor, input);
@@ -6611,8 +6612,8 @@ function nextRoutineDate(crons: string[], timezone: string): Date {
   return next;
 }
 
-/** A routine may only name a model the space has connected. */
-async function assertRoutineModel(
+/** A bot may only override to a model the space has connected. */
+async function assertBotModelOverride(
   deps: RouterDeps,
   actor: Actor,
   model: { modelProvider?: string | null; modelId?: string | null },
@@ -6625,6 +6626,15 @@ async function assertRoutineModel(
     model.modelId,
   );
   if (message) throw new ORPCError("BAD_REQUEST", { message });
+}
+
+/** A routine may only name a model the space has connected. */
+async function assertRoutineModel(
+  deps: RouterDeps,
+  actor: Actor,
+  model: { modelProvider?: string | null; modelId?: string | null },
+) {
+  await assertBotModelOverride(deps, actor, model);
 }
 
 function mapRoutine(row: {

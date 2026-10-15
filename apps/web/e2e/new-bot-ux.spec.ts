@@ -35,6 +35,8 @@ test("create opens form, then empty chat; picker lists bots; sidebar collapses",
   await expect(form.getByTestId("create-bot-computer")).toBeVisible();
   await expect(form.getByTestId("create-bot-team")).toBeVisible();
   await expect(form.getByTestId("create-bot-private")).toBeVisible();
+  await expect(form.getByTestId("create-bot-model")).toBeVisible();
+  await expect(form.getByTestId("create-bot-model")).toContainText("Space default");
   await captureScreenshot(page, testInfo, "create-bot-form");
 
   await form.locator("label:has-text('Name') input").fill("New Bot");

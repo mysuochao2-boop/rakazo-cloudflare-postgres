@@ -273,6 +273,21 @@ describe("contracts", () => {
     ).toBe(true);
   });
 
+  it("accepts a per-bot model override when creating a bot", () => {
+    expect(
+      CreateBotInput.safeParse({
+        name: "Chief",
+        modelProvider: "xai",
+        modelId: "grok-4.6",
+        thinkingLevel: "high",
+      }).success,
+    ).toBe(true);
+    expect(CreateBotInput.safeParse({ name: "Chief", modelId: null }).success).toBe(false);
+    expect(
+      CreateBotInput.safeParse({ name: "Chief", modelProvider: null, modelId: null }).success,
+    ).toBe(true);
+  });
+
   it("normalizes group names and rejects duplicate members", () => {
     expect(CreateGroupInput.parse({ name: "  Draft team  ", botIds: ["bot-1", "bot-2"] })).toEqual({
       name: "Draft team",

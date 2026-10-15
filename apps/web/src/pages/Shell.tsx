@@ -2373,12 +2373,18 @@ export function ShellPage() {
     title: string;
     description: string;
     computerMode: ComputerMode;
+    modelProvider?: string | null;
+    modelId?: string | null;
+    thinkingLevel?: ThinkingLevel | null;
   }) {
     const isFirstBot = botsRef.current.length === 0;
     const bot = await rpc.bots.create({
       ...normalizeCreateBotProfile(input),
       notifyOnFinish: true,
       computerMode: input.computerMode,
+      modelProvider: input.modelProvider ?? null,
+      modelId: input.modelId ?? null,
+      thinkingLevel: input.thinkingLevel ?? null,
     });
     setBots((current) =>
       current.some((item) => item.id === bot.id) ? current : [bot, ...current],
