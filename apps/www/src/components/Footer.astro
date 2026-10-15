@@ -1,0 +1,119 @@
+---
+import {
+  DEFAULT_LOCALE,
+  LOCALE_HREFLANG,
+  LOCALE_LABELS,
+  LOCALES,
+  isLocale,
+  localeHomePath,
+  type Locale,
+} from "../i18n/locales";
+import { GROK_ALTERNATIVE_PATH } from "../grok-alternative";
+import {
+  CHANGELOG_URL,
+  GITHUB_URL,
+  INBOX_ZERO_URL,
+  OPENCLAW_ALTERNATIVE_PATH,
+  SELF_HOST_GUIDE_PATH,
+} from "../site";
+import Logo from "./Logo.astro";
+
+type Props = {
+  locale?: Locale;
+  languagesLabel?: string;
+  navLabel?: string;
+  homeHref?: string;
+  homeLabel?: string;
+  linkLabels?: {
+    docs: string;
+    openClaw: string;
+    changelog: string;
+    alternatives: string;
+    about: string;
+    support: string;
+    privacy: string;
+    terms: string;
+    grokAlternative: string;
+    blog: string;
+  };
+};
+
+const currentLocale: Locale = isLocale(Astro.currentLocale)
+  ? Astro.currentLocale
+  : (Astro.props.locale ?? DEFAULT_LOCALE);
+
+const {
+  languagesLabel = "Language",
+  navLabel = "Footer",
+  homeHref = localeHomePath(currentLocale),
+  homeLabel = "Rakazo home",
+  linkLabels = {
+    docs: "Docs",
+    openClaw: "OpenClaw alternative",
+    changelog: "Changelog",
+    alternatives: "Alternatives",
+    about: "About",
+    support: "Support",
+    privacy: "Privacy",
+    terms: "Terms",
+    grokAlternative: "Grok Bot alternative",
+    blog: "Blog",
+  },
+} = Astro.props;
+
+const currentPath = Astro.url.pathname.replace(/\/+$/, "") || "/";
+
+function isCurrentPage(href: string): boolean {
+  return (href.replace(/\/+$/, "") || "/") === currentPath;
+}
+---
+
+<footer class="site-footer">
+  <div class="site-footer__brand">
+    <Logo href={homeHref} label={homeLabel} />
+    <span class="site-footer__legal">
+      © 2026 ·
+      <a href={INBOX_ZERO_URL} target="_blank" rel="noreferrer">Inbox Zero Inc.</a>
+      · Apache-2.0
+    </span>
+  </div>
+  <div class="site-footer__nav">
+    <nav class="site-footer__languages" aria-label={languagesLabel}>
+      {
+        LOCALES.map((locale) => (
+          <a
+            href={localeHomePath(locale)}
+            hreflang={LOCALE_HREFLANG[locale]}
+            aria-current={isCurrentPage(localeHomePath(locale)) ? "page" : undefined}
+          >
+            {LOCALE_LABELS[locale]}
+          </a>
+        ))
+      }
+    </nav>
+    <nav class="site-footer__links" aria-label={navLabel}>
+      <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
+      <a href={SELF_HOST_GUIDE_PATH} aria-current={isCurrentPage(SELF_HOST_GUIDE_PATH) ? "page" : undefined}>
+        {linkLabels.docs}
+      </a>
+      <a
+        href={OPENCLAW_ALTERNATIVE_PATH}
+        aria-current={isCurrentPage(OPENCLAW_ALTERNATIVE_PATH) ? "page" : undefined}
+      >
+        {linkLabels.openClaw}
+      </a>
+      <a href={CHANGELOG_URL} target="_blank" rel="noreferrer">{linkLabels.changelog}</a>
+      <a href="/alternatives/" aria-current={isCurrentPage("/alternatives/") ? "page" : undefined}>
+        {linkLabels.alternatives}
+      </a>
+      <a href={GROK_ALTERNATIVE_PATH} aria-current={isCurrentPage(GROK_ALTERNATIVE_PATH) ? "page" : undefined}>
+        {linkLabels.grokAlternative}
+      </a>
+      <a href="/blog/" aria-current={isCurrentPage("/blog/") ? "page" : undefined}>{linkLabels.blog}</a>
+      <a href="/about/">{linkLabels.about}</a>
+      <a href="/support/">{linkLabels.support}</a>
+      <a href="/privacy/">{linkLabels.privacy}</a>
+      <a href="/terms/">{linkLabels.terms}</a>
+    </nav>
+  </div>
+</footer>

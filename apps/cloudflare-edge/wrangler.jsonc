@@ -1,0 +1,120 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "rakazo-cloudflare-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-09",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "API_CONTAINER_REPLICAS": "2",
+    "SCHEDULER_CONTAINER_REPLICAS": "2",
+    "API_URL": "https://bot.51proxy.org",
+    "WEB_ORIGIN": "https://bot.51proxy.org"
+  },
+  "routes": [
+    {
+      "pattern": "bot.51proxy.org",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "r2_buckets": [
+    {
+      "binding": "OBJECT_STORE",
+      "bucket_name": "rakazo-runtime-test"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "scheduling_policy": "default",
+      "image": "./containers/api.Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-1",
+      "max_instances": 4
+    },
+    {
+      "class_name": "SchedulerContainer",
+      "scheduling_policy": "default",
+      "image": "./containers/scheduler.Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-1",
+      "max_instances": 2
+    },
+    {
+      "class_name": "BotRuntimeContainer",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "runtime": {
+          "dockerfile": "./containers/scheduler.Dockerfile",
+          "build_context": "../.."
+        }
+      }
+    },
+    {
+      "class_name": "ComputerContainer",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "computer": {
+          "dockerfile": "../../infra/sandboxes/computer/Dockerfile",
+          "build_context": "../../infra/sandboxes/computer"
+        }
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "API_CONTAINERS",
+        "class_name": "ApiContainer"
+      },
+      {
+        "name": "SCHEDULER_CONTAINERS",
+        "class_name": "SchedulerContainer"
+      },
+      {
+        "name": "BOT_RUNTIME_CONTAINERS",
+        "class_name": "BotRuntimeContainer"
+      },
+      {
+        "name": "COMPUTER_CONTAINERS",
+        "class_name": "ComputerContainer"
+      },
+      {
+        "name": "REALTIME_HUB",
+        "class_name": "RealtimeHub"
+      }
+    ]
+  },
+  "exports": {
+    "ApiContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "SchedulerContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "BotRuntimeContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "ComputerContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "RealtimeHub": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}
