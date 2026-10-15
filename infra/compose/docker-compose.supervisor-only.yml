@@ -35,6 +35,7 @@ services:
       - supervisor-data:/data
 
   supervisor:
+    container_name: rakazo-supervisor
     build:
       context: ../..
       dockerfile: infra/sandboxes/supervisor/Dockerfile
@@ -58,6 +59,7 @@ services:
       DATA_DIR: /data
       # Bind API to loopback only; public access is via Nginx on computer.51proxy.org.
       SUPERVISOR_HOST: ${SUPERVISOR_HOST:-127.0.0.1}
+      SUPERVISOR_CONTAINER_NAME: rakazo-supervisor
       SUPERVISOR_PORT: "7091"
       DOCKER_SOCKET: /var/run/docker.sock
       RAKAZO_COMPUTER_IMAGE: ${RAKAZO_COMPUTER_IMAGE:-rakazo/computer}:${RAKAZO_COMPUTER_IMAGE_TAG:-local}

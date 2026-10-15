@@ -1684,13 +1684,22 @@ async function withSpaceComputerLock<T>(spaceId: string, task: () => Promise<T>)
 }
 
 async function inspectSupervisorContainer() {
-  if (supervisorInfo || !process.env.HOSTNAME) return supervisorInfo;
-  try {
-    supervisorInfo = await docker.getContainer(process.env.HOSTNAME).inspect();
-    return supervisorInfo;
-  } catch {
-    return undefined;
+  if (supervisorInfo) return supervisorInfo;
+  // Host networking replaces HOSTNAME with the VM hostname, so prefer an explicit
+  // compose name (SUPERVISOR_CONTAINER_NAME) before falling back to HOSTNAME.
+  const candidates = [
+    process.env.SUPERVISOR_CONTAINER_NAME?.trim(),
+    process.env.HOSTNAME?.trim(),
+  ].filter((value): value is string => Boolean(value));
+  for (const id of candidates) {
+    try {
+      supervisorInfo = await docker.getContainer(id).inspect();
+      return supervisorInfo;
+    } catch {
+      // try next candidate
+    }
   }
+  return undefined;
 }
 
 async function runContainerCommand(
