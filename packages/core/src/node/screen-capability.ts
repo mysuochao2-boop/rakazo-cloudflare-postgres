@@ -224,16 +224,29 @@ function remoteTargetPath(target: URL, requestedPath: string) {
   return `${path}${requested.search}`;
 }
 
+function screenUpstreamAllowlistFromEnv(): Set<string> {
+  const hosts = new Set<string>();
+  const raw = process.env.SCREEN_UPSTREAM_ALLOWLIST?.trim();
+  if (!raw) return hosts;
+  for (const part of raw.split(",")) {
+    const host = part.trim().toLowerCase();
+    if (host && !/[\s/]/.test(host)) hosts.add(host);
+  }
+  return hosts;
+}
+
 function isAllowedTargetName(hostname: string) {
+  const host = hostname.toLowerCase();
   return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname === "computer.internal" ||
-    /^10\.(?:\d{1,3}\.){2}\d{1,3}$/.test(hostname) ||
-    /^100\.(?:6[4-9]|[7-9]\d|1(?:[01]\d|2[0-7]))\.(?:\d{1,3})\.\d{1,3}$/.test(hostname) ||
-    /^172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3})\.\d{1,3}$/.test(hostname) ||
-    /^192\.168\.(?:\d{1,3})\.\d{1,3}$/.test(hostname) ||
-    /^rakazo-bot-[a-zA-Z0-9_.-]+$/.test(hostname)
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "computer.internal" ||
+    screenUpstreamAllowlistFromEnv().has(host) ||
+    /^10\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host) ||
+    /^100\.(?:6[4-9]|[7-9]\d|1(?:[01]\d|2[0-7]))\.(?:\d{1,3})\.\d{1,3}$/.test(host) ||
+    /^172\.(?:1[6-9]|2\d|3[01])\.(?:\d{1,3})\.\d{1,3}$/.test(host) ||
+    /^192\.168\.(?:\d{1,3})\.\d{1,3}$/.test(host) ||
+    /^rakazo-bot-[a-zA-Z0-9_.-]+$/.test(host)
   );
 }

@@ -393,7 +393,63 @@ export function legacyNetworkOwnedSolelyBy(
   return attachedBotIds.every((owner) => owner === botId);
 }
 
+
+/** How the supervisor maps a client homePath onto DATA_DIR/homes/<botId>. */
+export type SandboxHomeMode = "strict" | "local-key";
+
+export function resolveSandboxHomeMode(value: string | undefined): SandboxHomeMode {
+  return value?.trim().toLowerCase() === "local-key" ? "local-key" : "strict";
+}
+
+/**
+ * Map a client homePath onto this supervisor's DATA_DIR.
+ * - local-key: ignore client absolute path; always DATA_DIR/homes/<botId>
+ * - strict: accept exact local path, or a CF-style .../homes/<botId> suffix
+ *   (e.g. /tmp/rakazo/homes/<id> from Cloudflare Containers)
+ */
+export function resolveBotHomePath(input: {
+  dataDir: string;
+  botId: string;
+  clientHomePath: string;
+  mode?: SandboxHomeMode;
+}): string {
+  const expected = path.join(input.dataDir, "homes", input.botId);
+  if ((input.mode ?? "strict") === "local-key") return expected;
+  const resolved = path.resolve(input.clientHomePath);
+  if (resolved === expected) return expected;
+  const normalized = resolved.replace(/\/+$/, "");
+  if (normalized.endsWith(path.join("homes", input.botId))) return expected;
+  return resolved;
+}
+
+/**
+ * Public HTTPS base for Hybrid screen URLs (e.g. https://computer.example).
+ * When set, clients get `{base}/screen/{hostPort}/embed.html` while Docker still
+ * publishes noVNC on 127.0.0.1 only; Nginx path-proxies /screen/<port>/ → loopback.
+ * Readiness probes keep using SANDBOX_SCREEN_HOST (loopback).
+ */
+export function resolvePublicScreenBase(
+  value = process.env.PUBLIC_SCREEN_BASE ?? process.env.SANDBOX_PUBLIC_SCREEN_BASE,
+): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    if (!url.hostname || url.username || url.password) return undefined;
+    // Reject path/query so we always append /screen/<port>/ ourselves.
+    if ((url.pathname && url.pathname !== "/") || url.search || url.hash) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export function screenUrlFor(hostPort: string, host = SCREEN_HOST) {
+  const publicBase = resolvePublicScreenBase();
+  if (publicBase) {
+    return `${publicBase}/screen/${hostPort}/embed.html`;
+  }
   return `http://${host}:${hostPort}/embed.html`;
 }
 

@@ -48,3 +48,7 @@ apps/web/src/locales/**/*.mjs
 apps/web/src/locales/**/*.js
 apps/web/scripts/msgids.json
 playwright-report-www
+
+# Hybrid VPS supervisor secrets (never commit)
+.env.supervisor
+infra/compose/.env.supervisor
