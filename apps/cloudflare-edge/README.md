@@ -63,10 +63,15 @@ an independent random value. The generic S3-compatible settings (`OBJECT_STORE_E
 `OBJECT_STORE_BUCKET`, `OBJECT_STORE_ACCESS_KEY_ID`, and `OBJECT_STORE_SECRET_ACCESS_KEY`) remain
 available for release tools and deployment profiles that run outside the Worker gateway.
 
-The profile selects `SANDBOX_PROVIDER=cloudflare` inside API, Scheduler, and bot Containers. The
-Worker injects the authenticated Computer gateway; do not add its secret to
-`CONTAINER_ENV_JSON`. `COMPUTER_GATEWAY_SECRET` must be independent from every other internal
-secret. Other deployment profiles can still select the provider-neutral Docker or hosted adapters.
+The profile defaults to `SANDBOX_PROVIDER=cloudflare` inside API, Scheduler, and bot Containers.
+`CONTAINER_ENV_JSON` may override it to a supported provider such as `docker` for Hybrid setups
+that point `SANDBOX_SUPERVISOR_URL` / `SANDBOX_SUPERVISOR_TOKEN` at a remote supervisor (for example
+`https://computer.example`). Do not switch production until home-path and noVNC allowlist staging
+passes. The Worker injects the authenticated Cloudflare Computer gateway for the default provider;
+do not add `COMPUTER_GATEWAY_SECRET` to `CONTAINER_ENV_JSON`. For Hybrid noVNC, set Worker var
+`SCREEN_UPSTREAM_ALLOWLIST` to the comma-separated upstream hostnames the edge proxy may fetch
+(and mirror the same value into `CONTAINER_ENV_JSON` so API screen sealing accepts http upstreams).
+`COMPUTER_GATEWAY_SECRET` must be independent from every other internal secret.
 
 The profile routes inter-Container realtime signals through a hibernating Durable Object. Existing
 client SSE contracts remain unchanged; API Containers subscribe to the Durable Object and continue

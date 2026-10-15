@@ -47,8 +47,10 @@ Set the required secrets listed in `README.md`. Use independently generated valu
 `COMPUTER_GATEWAY_SECRET`. Never place their values in Wrangler vars, image layers, source files,
 or build logs.
 
-The Cloudflare profile selects its built-in `cloudflare` Computer provider. `docker` remains a
-Compose-only provider and is not valid for this profile.
+The Cloudflare profile defaults to its built-in `cloudflare` Computer provider. Hybrid remote
+Docker is supported by setting `SANDBOX_PROVIDER=docker` (plus supervisor URL/token) in
+`CONTAINER_ENV_JSON` after the edge `env.ts` override lands; keep production on `cloudflare` until
+staging proves supervisor home-path mode and `/novnc` upstream allowlisting.
 
 Run `pnpm cloudflare:preflight` in the release environment before applying migrations. Treat any
 reported error as a deployment blocker; review TLS warnings against the PostgreSQL provider's

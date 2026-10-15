@@ -41,6 +41,8 @@ import {
   publishedLoopbackControlHostPort,
   resolveComputerControlEndpoint,
   resolveComputerEgressMode,
+  resolveBotHomePath,
+  resolveSandboxHomeMode,
   resolveScreenNetworkMode,
   resolveScreenPublishTarget,
   resolveSpaceComputerLimit,
@@ -180,7 +182,12 @@ app.post("/computers", async (c) => {
       const runtimeInfo = await inspectSupervisorContainer();
       const networkMode = computerNetworkName(body.botId, runtimeInfo);
       const networkOwner = computerNetworkOwnerFor(dataDir, runtimeInfo);
-      const serviceHomePath = path.resolve(body.homePath);
+      const serviceHomePath = resolveBotHomePath({
+        dataDir,
+        botId: body.botId,
+        clientHomePath: body.homePath,
+        mode: resolveSandboxHomeMode(process.env.SANDBOX_HOME_MODE),
+      });
       assertBotHomePath(serviceHomePath, body.botId);
       const hostUid = process.getuid?.();
       const hostGid = process.getgid?.();

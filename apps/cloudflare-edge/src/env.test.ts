@@ -4,6 +4,7 @@ import {
   apiContainerEnv,
   botRuntimeContainerEnv,
   optionalContainerEnv,
+  resolveCloudflareSandboxProvider,
   schedulerContainerEnv,
 } from "./env.js";
 
@@ -61,6 +62,42 @@ describe("container environment", () => {
       API_PORT: "3100",
       REALTIME_FANOUT_SECRET: "realtime-secret",
     });
+  });
+
+
+  it("defaults SANDBOX_PROVIDER to cloudflare when JSON omits it", () => {
+    expect(apiContainerEnv(testEnv()).SANDBOX_PROVIDER).toBe("cloudflare");
+    expect(schedulerContainerEnv(testEnv()).SANDBOX_PROVIDER).toBe("cloudflare");
+    expect(botRuntimeContainerEnv(testEnv(), "bot-1").SANDBOX_PROVIDER).toBe("cloudflare");
+  });
+
+  it("lets CONTAINER_ENV_JSON select docker for Hybrid remote supervisor", () => {
+    const env = testEnv();
+    env.CONTAINER_ENV_JSON = JSON.stringify({
+      SANDBOX_PROVIDER: "docker",
+      SANDBOX_SUPERVISOR_URL: "https://computer.example/supervisor",
+      SANDBOX_SUPERVISOR_TOKEN: "supervisor-token",
+      SANDBOX_IDLE_MS: "0",
+    });
+    for (const resolved of [
+      apiContainerEnv(env),
+      schedulerContainerEnv(env),
+      botRuntimeContainerEnv(env, "bot-1"),
+    ]) {
+      expect(resolved.SANDBOX_PROVIDER).toBe("docker");
+      expect(resolved.SANDBOX_SUPERVISOR_URL).toBe("https://computer.example/supervisor");
+      expect(resolved.SANDBOX_SUPERVISOR_TOKEN).toBe("supervisor-token");
+      expect(resolved.SANDBOX_IDLE_MS).toBe("0");
+    }
+  });
+
+  it("ignores unknown SANDBOX_PROVIDER values from JSON", () => {
+    expect(resolveCloudflareSandboxProvider({ SANDBOX_PROVIDER: "not-a-provider" })).toBe(
+      "cloudflare",
+    );
+    const env = testEnv();
+    env.CONTAINER_ENV_JSON = JSON.stringify({ SANDBOX_PROVIDER: "not-a-provider" });
+    expect(apiContainerEnv(env).SANDBOX_PROVIDER).toBe("cloudflare");
   });
 
   it("rejects non-string values", () => {

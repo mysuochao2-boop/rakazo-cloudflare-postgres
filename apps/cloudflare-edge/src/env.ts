@@ -21,6 +21,8 @@ export interface CloudflareEnv {
   SCHEDULER_CONTAINER_REPLICAS: string;
   API_URL: string;
   WEB_ORIGIN: string;
+  /** Comma-separated hostnames the /novnc edge proxy may fetch (Hybrid VPS). */
+  SCREEN_UPSTREAM_ALLOWLIST?: string;
 }
 
 const BLOCKED_ENV_KEYS = new Set([
@@ -66,9 +68,34 @@ export function optionalContainerEnv(value: string | undefined): Record<string, 
   return result;
 }
 
+const SANDBOX_PROVIDERS = new Set([
+  "none",
+  "docker",
+  "cloudflare",
+  "e2b",
+  "daytona",
+  "createos",
+  "box",
+  "e2b-emulator",
+  "daytona-emulator",
+  "box-emulator",
+  "desktop",
+  "fake",
+]);
+
+/** Default cloudflare; CONTAINER_ENV_JSON may select a supported remote provider (e.g. docker). */
+export function resolveCloudflareSandboxProvider(
+  optional: Record<string, string>,
+): string {
+  const requested = optional.SANDBOX_PROVIDER?.trim();
+  if (requested && SANDBOX_PROVIDERS.has(requested)) return requested;
+  return "cloudflare";
+}
+
 export function apiContainerEnv(env: CloudflareEnv): Record<string, string> {
+  const optional = optionalContainerEnv(env.CONTAINER_ENV_JSON);
   return {
-    ...optionalContainerEnv(env.CONTAINER_ENV_JSON),
+    ...optional,
     AGENT_RUNTIME: "pi",
     API_HOST: "0.0.0.0",
     API_PORT: "3100",
@@ -86,14 +113,15 @@ export function apiContainerEnv(env: CloudflareEnv): Record<string, string> {
     REALTIME_FANOUT_SECRET: env.REALTIME_FANOUT_SECRET,
     REALTIME_FANOUT_URL: env.API_URL,
     SCREEN_PROXY_SECRET: env.SCREEN_PROXY_SECRET,
-    SANDBOX_PROVIDER: "cloudflare",
+    SANDBOX_PROVIDER: resolveCloudflareSandboxProvider(optional),
     WEB_ORIGIN: env.WEB_ORIGIN,
   };
 }
 
 export function schedulerContainerEnv(env: CloudflareEnv): Record<string, string> {
+  const optional = optionalContainerEnv(env.CONTAINER_ENV_JSON);
   return {
-    ...optionalContainerEnv(env.CONTAINER_ENV_JSON),
+    ...optional,
     AGENT_RUNTIME: "pi",
     DATABASE_URL: env.WORKER_DATABASE_URL,
     DATA_DIR: "/tmp/rakazo",
@@ -109,15 +137,16 @@ export function schedulerContainerEnv(env: CloudflareEnv): Record<string, string
     REALTIME_FANOUT_SECRET: env.REALTIME_FANOUT_SECRET,
     REALTIME_FANOUT_URL: env.API_URL,
     SCREEN_PROXY_SECRET: env.SCREEN_PROXY_SECRET,
-    SANDBOX_PROVIDER: "cloudflare",
+    SANDBOX_PROVIDER: resolveCloudflareSandboxProvider(optional),
     RUNTIME_DISPATCH_SECRET: env.RUNTIME_DISPATCH_SECRET,
     RUNTIME_DISPATCH_URL: new URL("/__runtime/dispatch", env.API_URL).toString(),
   };
 }
 
 export function botRuntimeContainerEnv(env: CloudflareEnv, botId: string): Record<string, string> {
+  const optional = optionalContainerEnv(env.CONTAINER_ENV_JSON);
   return {
-    ...optionalContainerEnv(env.CONTAINER_ENV_JSON),
+    ...optional,
     AGENT_RUNTIME: "pi",
     BOT_ID: botId,
     CLOUDFLARE_COMPUTER_SECRET: env.COMPUTER_GATEWAY_SECRET,
@@ -138,6 +167,6 @@ export function botRuntimeContainerEnv(env: CloudflareEnv, botId: string): Recor
     RUNTIME_CALLBACK_URL: new URL("/__runtime/finished", env.API_URL).toString(),
     RUNTIME_DISPATCH_SECRET: env.RUNTIME_DISPATCH_SECRET,
     SCREEN_PROXY_SECRET: env.SCREEN_PROXY_SECRET,
-    SANDBOX_PROVIDER: "cloudflare",
+    SANDBOX_PROVIDER: resolveCloudflareSandboxProvider(optional),
   };
 }

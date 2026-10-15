@@ -1,0 +1,94 @@
+# Hybrid Computer: run only sandbox-supervisor + computer image on a VPS.
+# Does NOT start API/web/postgres — Cloudflare keeps the control plane.
+#
+#   cd /path/to/rakazo-cloudflare-postgres
+#   # put secrets in infra/compose/.env.supervisor (never commit):
+#   #   SANDBOX_SUPERVISOR_TOKEN=...
+#   #   RAKAZO_COMPUTER_IMAGE=rakazo/computer
+#   #   RAKAZO_COMPUTER_IMAGE_TAG=local
+#   docker compose --env-file infra/compose/.env.supervisor \
+#     -f infra/compose/docker-compose.supervisor-only.yml \
+#     up -d --build
+#
+# Publish supervisor only on loopback; put Nginx TLS in front (e.g. computer.example → 127.0.0.1:7091).
+# Set SANDBOX_HOME_MODE=local-key so Cloudflare Containers can provision without sharing DATA_DIR paths.
+
+name: rakazo-supervisor
+
+services:
+  computer:
+    image: ${RAKAZO_COMPUTER_IMAGE:-rakazo/computer}:${RAKAZO_COMPUTER_IMAGE_TAG:-local}
+    build:
+      context: ../sandboxes/computer
+    pull_policy: build
+    command: ["true"]
+    network_mode: none
+    restart: "no"
+
+  data-init:
+    image: ${BUSYBOX_IMAGE:-busybox:1}
+    command: ["chown", "-R", "1000:1000", "/data"]
+    network_mode: none
+    restart: "no"
+    volumes:
+      - supervisor-data:/data
+
+  supervisor:
+    build:
+      context: ../..
+      dockerfile: infra/sandboxes/supervisor/Dockerfile
+    restart: unless-stopped
+    init: true
+    user: root
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "127.0.0.1:7091:7091"
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      SUPERVISOR_HOST: "0.0.0.0"
+      SUPERVISOR_PORT: "7091"
+      DOCKER_SOCKET: /var/run/docker.sock
+      RAKAZO_COMPUTER_IMAGE: ${RAKAZO_COMPUTER_IMAGE:-rakazo/computer}:${RAKAZO_COMPUTER_IMAGE_TAG:-local}
+      RAKAZO_COMPUTER_MEMORY: ${RAKAZO_COMPUTER_MEMORY:-2g}
+      RAKAZO_COMPUTER_CPUS: ${RAKAZO_COMPUTER_CPUS:-2}
+      RAKAZO_COMPUTER_PIDS_LIMIT: ${RAKAZO_COMPUTER_PIDS_LIMIT:-2048}
+      SANDBOX_COMMAND_TIMEOUT_MS: ${SANDBOX_COMMAND_TIMEOUT_MS:-300000}
+      SANDBOX_TEAM_SCREEN_LIMIT: ${SANDBOX_TEAM_SCREEN_LIMIT:-0}
+      SANDBOX_MAX_COMPUTERS_PER_SPACE: ${SANDBOX_MAX_COMPUTERS_PER_SPACE:-0}
+      SANDBOX_SUPERVISOR_TOKEN: ${SANDBOX_SUPERVISOR_TOKEN:?Set SANDBOX_SUPERVISOR_TOKEN in .env.supervisor}
+      SANDBOX_HOME_MODE: ${SANDBOX_HOME_MODE:-local-key}
+      # published: CF edge can reach host-mapped noVNC via SCREEN_HOST / allowlist.
+      SANDBOX_SCREEN_NETWORK: ${SANDBOX_SCREEN_NETWORK:-published}
+      SANDBOX_SCREEN_HOST: ${SANDBOX_SCREEN_HOST:-127.0.0.1}
+      SANDBOX_COMPUTER_EGRESS: ${SANDBOX_COMPUTER_EGRESS:-restricted}
+      SANDBOX_IDLE_MS: ${SANDBOX_IDLE_MS:-0}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - supervisor-data:/data
+    depends_on:
+      computer:
+        condition: service_completed_successfully
+      data-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:7091/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  supervisor-data:

@@ -143,4 +143,80 @@ describe("Cloudflare Computer screen gateway", () => {
     expect(getByName).toHaveBeenCalledWith("v9:computer-home");
     expect(computerFetch).toHaveBeenCalledOnce();
   });
+
+  it("proxies allowlisted remote Hybrid noVNC upstreams without using Computer DOs", async () => {
+    const remoteFetch = vi.fn(
+      async (_request: Request) =>
+        new Response("remote-desktop", {
+          headers: {
+            "content-type": "text/html",
+            "set-cookie": "session=fake",
+          },
+        }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = remoteFetch as unknown as typeof fetch;
+    const getByName = vi.fn();
+    const env = {
+      API_CONTAINERS: {
+        getByName: () => ({
+          fetch: async () =>
+            Response.json({
+              protocol: "https:",
+              hostname: "computer.51proxy.org",
+              port: 443,
+              path: "/embed.html?view_only=true",
+            }),
+        }),
+      },
+      COMPUTER_CONTAINERS: { getByName },
+      SCREEN_PROXY_SECRET: "screen-secret",
+      SCREEN_UPSTREAM_ALLOWLIST: "computer.51proxy.org",
+    } as unknown as CloudflareEnv;
+    try {
+      const response = await computerScreenRequest(
+        new Request("https://app.example/novnc/session/view/capability/embed.html"),
+        env,
+        "api-v1",
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("remote-desktop");
+      expect(response.headers.has("set-cookie")).toBe(false);
+      expect(getByName).not.toHaveBeenCalled();
+      expect(remoteFetch).toHaveBeenCalledOnce();
+      const upstream = remoteFetch.mock.calls[0]![0] as Request;
+      expect(new URL(upstream.url).origin).toBe("https://computer.51proxy.org");
+      expect(upstream.headers.has("cookie")).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("rejects remote screen hosts outside the allowlist", async () => {
+    const getByName = vi.fn();
+    const env = {
+      API_CONTAINERS: {
+        getByName: () => ({
+          fetch: async () =>
+            Response.json({
+              protocol: "https:",
+              hostname: "evil.example",
+              port: 443,
+              path: "/embed.html",
+            }),
+        }),
+      },
+      COMPUTER_CONTAINERS: { getByName },
+      SCREEN_PROXY_SECRET: "screen-secret",
+      SCREEN_UPSTREAM_ALLOWLIST: "computer.51proxy.org",
+    } as unknown as CloudflareEnv;
+    const response = await computerScreenRequest(
+      new Request("https://app.example/novnc/session/view/capability/embed.html"),
+      env,
+      "api-v1",
+    );
+    expect(response.status).toBe(403);
+    expect(getByName).not.toHaveBeenCalled();
+  });
+
 });

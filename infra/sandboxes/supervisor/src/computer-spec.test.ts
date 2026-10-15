@@ -46,6 +46,8 @@ import {
   screenUrlFor,
   screenUrlWithToken,
   xdotoolCommand,
+  resolveBotHomePath,
+  resolveSandboxHomeMode,
 } from "./computer-spec.js";
 
 describe("graphical computer spec", () => {
@@ -1781,5 +1783,58 @@ describe("computer home storage", () => {
     );
     // Steady state waits on Xvfb instead of polling, so the trap runs immediately.
     expect(start).toMatch(/^wait "\$XVFB_PID"$/m);
+  });
+});
+
+describe("resolveBotHomePath", () => {
+  const dataDir = "/var/rakazo";
+
+  it("keeps strict exact matches", () => {
+    expect(
+      resolveBotHomePath({
+        dataDir,
+        botId: "bot-1",
+        clientHomePath: "/var/rakazo/homes/bot-1",
+      }),
+    ).toBe("/var/rakazo/homes/bot-1");
+  });
+
+  it("accepts Cloudflare-style /tmp/rakazo/homes/<botId> under strict mode", () => {
+    expect(
+      resolveBotHomePath({
+        dataDir,
+        botId: "bot-1",
+        clientHomePath: "/tmp/rakazo/homes/bot-1",
+        mode: "strict",
+      }),
+    ).toBe("/var/rakazo/homes/bot-1");
+  });
+
+  it("local-key ignores a mismatched client absolute path", () => {
+    expect(
+      resolveBotHomePath({
+        dataDir,
+        botId: "bot-1",
+        clientHomePath: "/tmp/never-used",
+        mode: "local-key",
+      }),
+    ).toBe("/var/rakazo/homes/bot-1");
+  });
+
+  it("still rejects unrelated strict paths before assert", () => {
+    expect(
+      resolveBotHomePath({
+        dataDir,
+        botId: "bot-1",
+        clientHomePath: "/tmp/other",
+        mode: "strict",
+      }),
+    ).toBe("/tmp/other");
+  });
+
+  it("parses SANDBOX_HOME_MODE", () => {
+    expect(resolveSandboxHomeMode("local-key")).toBe("local-key");
+    expect(resolveSandboxHomeMode("strict")).toBe("strict");
+    expect(resolveSandboxHomeMode(undefined)).toBe("strict");
   });
 });

@@ -65,6 +65,66 @@ export async function computerGatewayRequest(
   );
 }
 
+function screenUpstreamAllowlist(env: CloudflareEnv): Set<string> {
+  const hosts = new Set<string>(["computer.internal"]);
+  const raw = env.SCREEN_UPSTREAM_ALLOWLIST?.trim();
+  if (!raw) return hosts;
+  for (const part of raw.split(",")) {
+    const host = part.trim().toLowerCase();
+    if (host && !/[\s/]/.test(host)) hosts.add(host);
+  }
+  return hosts;
+}
+
+function isCloudflareComputerScreenTarget(target: {
+  hostname: string;
+  port: number;
+  path: string;
+}): boolean {
+  return (
+    target.hostname === "computer.internal" &&
+    Number.isInteger(target.port) &&
+    target.port >= 6080 &&
+    target.port < 6080 + 16 &&
+    typeof target.path === "string"
+  );
+}
+
+function isAllowedRemoteScreenTarget(
+  target: { protocol?: string; hostname: string; port: number; path: string },
+  allowlist: Set<string>,
+): boolean {
+  if (!allowlist.has(target.hostname.toLowerCase())) return false;
+  if (target.hostname === "computer.internal") return false;
+  if (!Number.isInteger(target.port) || target.port < 1 || target.port > 65535) return false;
+  if (typeof target.path !== "string" || !target.path.startsWith("/")) return false;
+  // Prefer TLS for public Hybrid upstreams; allow http only on high ports (published noVNC).
+  if (target.protocol === "https:") return target.port === 443 || target.port > 1023;
+  if (target.protocol === "http:") return target.port >= 1024;
+  return false;
+}
+
+function sanitizeScreenProxyResponse(response: Response): Response {
+  const safe = safeScreenProxyResponseHeaders(Object.fromEntries(response.headers));
+  const responseHeaders = new Headers();
+  for (const [name, value] of Object.entries(safe)) {
+    for (const part of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+      responseHeaders.append(name, part);
+    }
+  }
+  // The capability is checked on every request, including module imports from
+  // the viewer's opaque iframe origin. Never reuse an old unsanitized response.
+  // Cloudflare Web Analytics must not inject its beacon into the opaque noVNC iframe:
+  // the beacon posts to /cdn-cgi/rum with Origin: null and creates a misleading CORS error.
+  responseHeaders.set("cache-control", "no-store, no-transform");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
+    ...(response.webSocket ? { webSocket: response.webSocket } : {}),
+  });
+}
+
 export async function computerScreenRequest(
   request: Request,
   env: CloudflareEnv,
@@ -85,20 +145,47 @@ export async function computerScreenRequest(
   );
   if (!targetResponse.ok) return new Response("Forbidden", { status: 403 });
   const target = (await targetResponse.json()) as {
+    protocol?: unknown;
     hostname?: unknown;
     port?: unknown;
     path?: unknown;
   };
   if (
-    target.hostname !== "computer.internal" ||
+    typeof target.hostname !== "string" ||
     !Number.isInteger(target.port) ||
-    Number(target.port) < 6080 ||
-    Number(target.port) >= 6080 + 16 ||
     typeof target.path !== "string"
   ) {
     return new Response("Forbidden", { status: 403 });
   }
-  const path = target.path as string;
+  const allowlist = screenUpstreamAllowlist(env);
+  const protocol =
+    target.protocol === "https:" || target.protocol === "http:" ? target.protocol : "http:";
+  const typed = {
+    protocol,
+    hostname: target.hostname,
+    port: Number(target.port),
+    path: target.path,
+  };
+
+  // Hybrid remote Docker/VPS noVNC: capability-gated reverse proxy to allowlisted upstream.
+  if (isAllowedRemoteScreenTarget(typed, allowlist)) {
+    const upstream = new URL(typed.path, `${typed.protocol}//${typed.hostname}`);
+    upstream.port = String(typed.port);
+    const headers = new Headers(request.headers);
+    for (const name of ["authorization", "cookie", "host", "proxy-authorization"]) {
+      headers.delete(name);
+    }
+    headers.set("host", typed.hostname);
+    const response = await fetch(
+      new Request(upstream, { method: request.method, headers, body: request.body }),
+    );
+    return sanitizeScreenProxyResponse(response);
+  }
+
+  if (!isCloudflareComputerScreenTarget(typed)) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  const path = typed.path;
   const targetUrl = new URL(path, "http://computer.internal");
   const match = targetUrl.pathname.match(/^\/([^/]+)(\/.*)$/);
   if (!match) return new Response("Forbidden", { status: 403 });
@@ -124,7 +211,7 @@ export async function computerScreenRequest(
       headers: { location: url.toString(), "cache-control": "no-store" },
     });
   }
-  url.pathname = `/__port/${target.port}${match[2]}`;
+  url.pathname = `/__port/${typed.port}${match[2]}`;
   url.search = targetUrl.search;
   const headers = new Headers(request.headers);
   for (const name of ["authorization", "cookie", "host", "proxy-authorization"]) {
@@ -134,22 +221,5 @@ export async function computerScreenRequest(
   const response = await computerStub(env, computerId).fetch(
     new Request(url, { method: request.method, headers, body: request.body }),
   );
-  const safe = safeScreenProxyResponseHeaders(Object.fromEntries(response.headers));
-  const responseHeaders = new Headers();
-  for (const [name, value] of Object.entries(safe)) {
-    for (const part of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
-      responseHeaders.append(name, part);
-    }
-  }
-  // The capability is checked on every request, including module imports from
-  // the viewer's opaque iframe origin. Never reuse an old unsanitized response.
-  // Cloudflare Web Analytics must not inject its beacon into the opaque noVNC iframe:
-  // the beacon posts to /cdn-cgi/rum with Origin: null and creates a misleading CORS error.
-  responseHeaders.set("cache-control", "no-store, no-transform");
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: responseHeaders,
-    ...(response.webSocket ? { webSocket: response.webSocket } : {}),
-  });
+  return sanitizeScreenProxyResponse(response);
 }
