@@ -10,7 +10,8 @@
 #     -f infra/compose/docker-compose.supervisor-only.yml \
 #     up -d --build
 #
-# Publish supervisor only on loopback; put Nginx TLS in front (e.g. computer.example → 127.0.0.1:7091).
+# Supervisor uses host networking + SUPERVISOR_HOST=127.0.0.1; put Nginx TLS in front (computer.example → 127.0.0.1:7091).
+# Host network is required so screen readiness can reach HostIp=127.0.0.1 published noVNC ports.
 # Set SANDBOX_HOME_MODE=local-key so Cloudflare Containers can provision without sharing DATA_DIR paths.
 
 name: rakazo-supervisor
@@ -40,6 +41,9 @@ services:
     restart: unless-stopped
     init: true
     user: root
+    # Host network so readiness can hit HostIp=127.0.0.1 published noVNC ports
+    # (bridged containers cannot reach host-loopback publishes). Nginx still fronts TLS.
+    network_mode: host
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
@@ -49,12 +53,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    ports:
-      - "127.0.0.1:7091:7091"
     environment:
       NODE_ENV: production
       DATA_DIR: /data
-      SUPERVISOR_HOST: "0.0.0.0"
+      # Bind API to loopback only; public access is via Nginx on computer.51proxy.org.
+      SUPERVISOR_HOST: ${SUPERVISOR_HOST:-127.0.0.1}
       SUPERVISOR_PORT: "7091"
       DOCKER_SOCKET: /var/run/docker.sock
       RAKAZO_COMPUTER_IMAGE: ${RAKAZO_COMPUTER_IMAGE:-rakazo/computer}:${RAKAZO_COMPUTER_IMAGE_TAG:-local}
