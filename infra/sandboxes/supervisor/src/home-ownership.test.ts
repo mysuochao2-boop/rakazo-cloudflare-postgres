@@ -13,7 +13,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assertComputerHomeWritable, assertOpenedDirectoryBeneathRoot } from "./home-ownership.js";
+import {
+  assertComputerHomeWritable,
+  assertOpenedDirectoryBeneathRoot,
+  ensureLocalKeyComputerHome,
+} from "./home-ownership.js";
 
 const roots: string[] = [];
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
@@ -186,4 +190,17 @@ describe("computer home ownership", () => {
       }
     },
   );
+});
+
+
+describe("ensureLocalKeyComputerHome", () => {
+  it("creates a missing home directory", async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), "rakazo-home-ensure-"));
+    roots.push(parent);
+    const home = path.join(parent, "homes", "bot-new");
+    await ensureLocalKeyComputerHome(home, 1000, 1000);
+    const st = await lstat(home);
+    expect(st.isDirectory()).toBe(true);
+    await expect(assertComputerHomeWritable(home, st.uid, st.gid)).resolves.toBeUndefined();
+  });
 });

@@ -1,5 +1,5 @@
 import { constants, type Stats } from "node:fs";
-import { type FileHandle, lstat, open, opendir, readlink } from "node:fs/promises";
+import { type FileHandle, chown, lstat, mkdir, open, opendir, readlink } from "node:fs/promises";
 import path from "node:path";
 
 const DIRECTORY_OPEN_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
@@ -179,6 +179,55 @@ async function assertWritableLinux(root: string, uid: number, gid: number): Prom
     await assertWritableDirectory(handle, rootPath, root, uid, gid);
   } finally {
     await handle.close();
+  }
+}
+
+
+async function directoryIsEmpty(target: string): Promise<boolean> {
+  const directory = await opendir(target);
+  for await (const _entry of directory) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Hybrid (`SANDBOX_HOME_MODE=local-key`): the Cloudflare API cannot mkdir on this
+ * supervisor's DATA_DIR volume. Create `DATA_DIR/homes/<botId>` when missing.
+ * Safe because the path is always derived from botId (never a client absolute path).
+ * As root, chown a freshly created (or empty) home to the computer uid/gid so
+ * `assertComputerHomeWritable` can pass without privileged tree walks of user data.
+ */
+export async function ensureLocalKeyComputerHome(
+  botHome: string,
+  uid: number,
+  gid: number,
+): Promise<void> {
+  let existed = true;
+  try {
+    const st = await lstat(botHome);
+    if (st.isSymbolicLink()) {
+      throw new Error(`computer home ${botHome} must not be a symbolic link`);
+    }
+    if (!st.isDirectory()) {
+      throw new Error(`computer home ${botHome} must be a directory`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    existed = false;
+  }
+
+  if (!existed) {
+    await mkdir(botHome, { recursive: true, mode: 0o700 });
+  }
+
+  // Non-root supervisors already create as the runtime user; no chown needed.
+  if (process.getuid?.() !== 0) return;
+
+  const st = await lstat(botHome);
+  if (st.uid === uid && st.gid === gid) return;
+  if (!existed || (await directoryIsEmpty(botHome))) {
+    await chown(botHome, uid, gid);
   }
 }
 

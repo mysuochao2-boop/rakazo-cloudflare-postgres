@@ -53,7 +53,7 @@ import {
   screenUrlWithToken,
   xdotoolCommand,
 } from "./computer-spec.js";
-import { assertComputerHomeWritable } from "./home-ownership.js";
+import { assertComputerHomeWritable, ensureLocalKeyComputerHome } from "./home-ownership.js";
 import {
   assertRequestIdentity,
   attemptComputerControl,
@@ -191,10 +191,16 @@ app.post("/computers", async (c) => {
       assertBotHomePath(serviceHomePath, body.botId);
       const hostUid = process.getuid?.();
       const hostGid = process.getgid?.();
+      const homeMode = resolveSandboxHomeMode(process.env.SANDBOX_HOME_MODE);
       // The API normally creates the home. A non-root standalone supervisor may
-      // do so as the same user, but a root supervisor must never create or chown
-      // user-controlled paths at runtime; Compose data-init handles legacy data.
-      if (hostUid !== 0) await mkdir(serviceHomePath, { recursive: true });
+      // do so as the same user. Root supervisors must not mkdir arbitrary client
+      // paths, but Hybrid local-key homes are always DATA_DIR/homes/<botId> —
+      // create those so a remote Cloudflare API can provision without a shared FS.
+      if (homeMode === "local-key") {
+        await ensureLocalKeyComputerHome(serviceHomePath, COMPUTER_UID, COMPUTER_GID);
+      } else if (hostUid !== 0) {
+        await mkdir(serviceHomePath, { recursive: true });
+      }
       const storage = computerHomeStorage(serviceHomePath, dataDir, runtimeInfo);
       if (storage.homeVolume) {
         assertVolumeSubpathSupport((await docker.version()).ApiVersion);
@@ -734,20 +740,20 @@ app.get("/computers/:id/screen", async (c) => {
 });
 
 app.post("/computers/:id/screen-mode", async (c) => {
-  const body = z
-    .object({
-      interactive: z.boolean(),
-      controlToken: z
-        .string()
-        .regex(/^[A-Za-z0-9_-]{1,128}$/)
-        .optional(),
-      revokeControl: z.boolean().optional(),
-    })
-    .refine((value) => !value.interactive || value.controlToken, {
-      message: "interactive screen requires a control token",
-    })
-    .parse(await c.req.json());
   try {
+    const body = z
+      .object({
+        interactive: z.boolean().default(false),
+        controlToken: z
+          .string()
+          .regex(/^[A-Za-z0-9_-]{1,128}$/)
+          .optional(),
+        revokeControl: z.boolean().optional(),
+      })
+      .refine((value) => !value.interactive || value.controlToken, {
+        message: "interactive screen requires a control token",
+      })
+      .parse(await c.req.json());
     const id = c.req.param("id");
     const botId = c.req.header("x-rakazo-bot-id");
     const spaceId = c.req.header("x-rakazo-space-id");
