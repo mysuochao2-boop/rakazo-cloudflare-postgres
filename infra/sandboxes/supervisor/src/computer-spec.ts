@@ -422,7 +422,34 @@ export function resolveBotHomePath(input: {
   return resolved;
 }
 
+/**
+ * Public HTTPS base for Hybrid screen URLs (e.g. https://computer.example).
+ * When set, clients get `{base}/screen/{hostPort}/embed.html` while Docker still
+ * publishes noVNC on 127.0.0.1 only; Nginx path-proxies /screen/<port>/ → loopback.
+ * Readiness probes keep using SANDBOX_SCREEN_HOST (loopback).
+ */
+export function resolvePublicScreenBase(
+  value = process.env.PUBLIC_SCREEN_BASE ?? process.env.SANDBOX_PUBLIC_SCREEN_BASE,
+): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    if (!url.hostname || url.username || url.password) return undefined;
+    // Reject path/query so we always append /screen/<port>/ ourselves.
+    if ((url.pathname && url.pathname !== "/") || url.search || url.hash) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export function screenUrlFor(hostPort: string, host = SCREEN_HOST) {
+  const publicBase = resolvePublicScreenBase();
+  if (publicBase) {
+    return `${publicBase}/screen/${hostPort}/embed.html`;
+  }
   return `http://${host}:${hostPort}/embed.html`;
 }
 

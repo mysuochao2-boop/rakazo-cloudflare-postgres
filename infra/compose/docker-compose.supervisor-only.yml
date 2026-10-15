@@ -69,6 +69,8 @@ services:
       # published: CF edge can reach host-mapped noVNC via SCREEN_HOST / allowlist.
       SANDBOX_SCREEN_NETWORK: ${SANDBOX_SCREEN_NETWORK:-published}
       SANDBOX_SCREEN_HOST: ${SANDBOX_SCREEN_HOST:-127.0.0.1}
+      # Hybrid: public URL base for /screen/<port>/ via Nginx (Docker HostIp stays 127.0.0.1).
+      PUBLIC_SCREEN_BASE: ${PUBLIC_SCREEN_BASE:-}
       SANDBOX_COMPUTER_EGRESS: ${SANDBOX_COMPUTER_EGRESS:-restricted}
       SANDBOX_IDLE_MS: ${SANDBOX_IDLE_MS:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}

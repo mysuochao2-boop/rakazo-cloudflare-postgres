@@ -18,7 +18,7 @@ import {
   TERMINAL_MENU_COMMAND,
 } from "@rakazo/core/node/desktop-runtime";
 import type Docker from "dockerode";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertVolumeSubpathSupport,
   COMPUTER_IMAGE,
@@ -43,6 +43,7 @@ import {
   resolveSpaceComputerLimit,
   resolveTeamScreenLimit,
   screenPorts,
+  resolvePublicScreenBase,
   screenUrlFor,
   screenUrlWithToken,
   xdotoolCommand,
@@ -1223,6 +1224,18 @@ describe("graphical computer spec", () => {
 
   it("points the screen at the chrome-less noVNC embed", () => {
     expect(screenUrlFor("16080")).toBe("http://127.0.0.1:16080/embed.html");
+  });
+
+  it("rewrites screen URLs through PUBLIC_SCREEN_BASE path proxy", () => {
+    vi.stubEnv("PUBLIC_SCREEN_BASE", "https://computer.51proxy.org");
+    try {
+      expect(resolvePublicScreenBase()).toBe("https://computer.51proxy.org");
+      expect(screenUrlFor("49152")).toBe("https://computer.51proxy.org/screen/49152/embed.html");
+      vi.stubEnv("PUBLIC_SCREEN_BASE", "https://computer.51proxy.org/extra");
+      expect(resolvePublicScreenBase()).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("wires host clipboard paste into the chrome-less embed", () => {
