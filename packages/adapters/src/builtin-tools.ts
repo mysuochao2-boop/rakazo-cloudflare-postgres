@@ -260,7 +260,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "read_file",
     description:
-      "Read a UTF-8 text file from this bot's home. On a Team Computer, relative paths use the bot folder and shared/... accesses shared work. Open visual or binary files with open_path instead.",
+      "Read a UTF-8 text file from this bot's home. On a Team Computer, relative paths use the bot folder and shared/... accesses shared work. Open visual or binary files with open_path instead. Never use this for machine/hardware inventory (电脑配置/硬件信息) or to read binaries such as node or .local/bin/* — use shell (uname/lscpu/free/df/os-release) instead.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" } },
@@ -297,7 +297,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "shell",
     description:
-      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. On a graphical computer, desktop-protection refuses opaque shell syntax (unquoted parentheses, $(...), unresolved $vars, interpreter heredocs); use simple sequential commands instead.",
+      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. For machine/hardware config (电脑配置/硬件信息) use simple sequential commands only: uname -a; lscpu; free -h; df -h; cat /etc/os-release; nproc — never fall back to read_file on binaries (node/.local/bin). On a graphical computer, desktop-protection refuses opaque shell syntax (unquoted parentheses, $(...), unresolved $vars, interpreter heredocs); rewrite without those forms instead of reading huge trees or binaries.",
     inputSchema: {
       type: "object",
       properties: {

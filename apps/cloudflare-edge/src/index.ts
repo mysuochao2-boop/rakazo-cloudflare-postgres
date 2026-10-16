@@ -19,7 +19,7 @@ interface RuntimeCommand {
 // only the bot-id fence, so a new generation safely gets a fresh Container.
 const API_CONTAINER_GENERATION = "v6";
 const SCHEDULER_CONTAINER_GENERATION = "v3";
-const BOT_RUNTIME_GENERATION = "v9";
+const BOT_RUNTIME_GENERATION = "v10";
 
 function runtimeCommand(value: unknown): RuntimeCommand | null {
   if (!value || typeof value !== "object") return null;

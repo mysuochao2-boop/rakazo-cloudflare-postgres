@@ -12,6 +12,8 @@ import {
   loadCurrentTurnImages,
   missingTurnImagesInstruction,
   parseUpdateBotPatch,
+  MACHINE_HARDWARE_SHELL_ONLY_GUIDANCE,
+  MACHINE_HARDWARE_DESKTOP_GUARD_REWRITE,
   persistentComputerInstruction,
   runNotificationsEnabled,
   selectBuiltinToolsForRun,
@@ -1356,7 +1358,7 @@ describe("persistentComputerInstruction", () => {
         graphical: false,
       }),
     ).toBe(
-      "You have a persistent sandbox filesystem and shell. This backend does not provide model-visible graphical control, so use the file tools and shell.",
+      `You have a persistent sandbox filesystem and shell. This backend does not provide model-visible graphical control, so use the file tools and shell. ${MACHINE_HARDWARE_SHELL_ONLY_GUIDANCE}`,
     );
   });
 
@@ -1388,6 +1390,9 @@ describe("persistentComputerInstruction", () => {
     expect(instruction).toContain("Use computer_observe and computer_act");
     expect(instruction).toContain("Use open_path and launch_app");
     expect(instruction).toContain("Use the file tools and shell");
+    expect(instruction).toContain(MACHINE_HARDWARE_SHELL_ONLY_GUIDANCE);
+    expect(instruction).toContain(MACHINE_HARDWARE_DESKTOP_GUARD_REWRITE);
+    expect(instruction).toContain("电脑配置/硬件信息");
   });
 
   it("does not prescribe a disabled shell or observe tool", () => {
@@ -1400,6 +1405,7 @@ describe("persistentComputerInstruction", () => {
     expect(instruction).not.toContain("shell");
     expect(instruction).not.toContain("computer_observe");
     expect(instruction).not.toContain("computer_act");
+    expect(instruction).not.toContain("电脑配置/硬件信息");
     expect(instruction).toContain("Use the file tools for precise filesystem work.");
     expect(instruction).toContain("Use open_path and launch_app");
   });
