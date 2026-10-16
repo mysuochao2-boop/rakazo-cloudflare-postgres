@@ -17,7 +17,7 @@ interface RuntimeCommand {
 // Bump only when a deployed Container generation leaves Durable Object
 // instances unable to restart. The database owns run state; this object stores
 // only the bot-id fence, so a new generation safely gets a fresh Container.
-const API_CONTAINER_GENERATION = "v5";
+const API_CONTAINER_GENERATION = "v6";
 const SCHEDULER_CONTAINER_GENERATION = "v3";
 const BOT_RUNTIME_GENERATION = "v9";
 
