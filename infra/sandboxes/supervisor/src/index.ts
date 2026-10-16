@@ -113,6 +113,8 @@ const computerScreens = new Map<string, Map<string, ScreenAssignment>>();
 
 export const MAX_SUPERVISOR_REQUEST_BYTES = 1024 * 1024;
 export const MAX_SUPERVISOR_FILE_REQUEST_BYTES = 16 * 1024 * 1024 + 64 * 1024;
+/** Raw file bytes for GET /files?mode=read. Hard cap so base64+JSON cannot OOM the 512m supervisor. */
+export const MAX_SUPERVISOR_FILE_READ_BYTES = 8 * 1024 * 1024;
 
 /** Keep normal control requests small while allowing the existing 16 MiB file payload. */
 export function supervisorRequestBodyLimit(method: string, pathname: string): number {
@@ -643,10 +645,18 @@ app.get("/computers/:id/files", async (c) => {
     const target = workspaceTarget(relative);
     if (c.req.query("mode") === "read") {
       const maxBytesRaw = c.req.query("maxBytes");
-      const maxBytes = maxBytesRaw === undefined ? undefined : Number(maxBytesRaw);
-      if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 0)) {
+      const requested =
+        maxBytesRaw === undefined ? MAX_SUPERVISOR_FILE_READ_BYTES : Number(maxBytesRaw);
+      if (!Number.isSafeInteger(requested) || requested < 0) {
         return c.json({ error: "invalid maxBytes" }, 400);
       }
+      if (requested > MAX_SUPERVISOR_FILE_READ_BYTES) {
+        return c.json(
+          { error: `computer file maxBytes exceeds ${MAX_SUPERVISOR_FILE_READ_BYTES} bytes` },
+          413,
+        );
+      }
+      const maxBytes = requested;
       const script = [
         "import base64, sys",
         "target, limit = sys.argv[1], int(sys.argv[2])",
@@ -660,7 +670,7 @@ app.get("/computers/:id/files", async (c) => {
         "-c",
         script,
         target,
-        String(maxBytes ?? -1),
+        String(maxBytes),
       ]);
       if (result.code === 42) {
         return c.json({ error: `computer file exceeds ${maxBytes} bytes` }, 413);

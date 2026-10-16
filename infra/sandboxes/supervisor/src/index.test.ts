@@ -8,6 +8,7 @@ import { resolveSupervisorToken } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   MAX_SUPERVISOR_FILE_REQUEST_BYTES,
+  MAX_SUPERVISOR_FILE_READ_BYTES,
   MAX_SUPERVISOR_REQUEST_BYTES,
   resolveDockerSocketPath,
   supervisorApp,
@@ -217,6 +218,11 @@ describe("sandbox supervisor HTTP boundary", () => {
       expect(response.status).toBe(413);
       await expect(response.json()).resolves.toEqual({ error: "Request body is too large." });
     }
+  });
+
+  it("caps file reads below the supervisor memory budget", () => {
+    expect(MAX_SUPERVISOR_FILE_READ_BYTES).toBe(8 * 1024 * 1024);
+    expect(MAX_SUPERVISOR_FILE_READ_BYTES).toBeLessThan(MAX_SUPERVISOR_FILE_REQUEST_BYTES);
   });
 
   it("keeps the larger file-write allowance scoped to that exact POST route", () => {

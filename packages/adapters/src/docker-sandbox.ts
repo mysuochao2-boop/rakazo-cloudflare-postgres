@@ -30,6 +30,8 @@ import { readBodyCapped, withAbort } from "./web-ssrf.js";
 
 export const MAX_SANDBOX_ERROR_RESPONSE_BYTES = 8 * 1024;
 export const MAX_SANDBOX_SUCCESS_RESPONSE_BYTES = 16 * 1024 * 1024;
+/** Keep in sync with supervisor MAX_SUPERVISOR_FILE_READ_BYTES (512m mem_limit OOM guard). */
+export const MAX_SANDBOX_EXPORT_FILE_BYTES = 8 * 1024 * 1024;
 export const SCREEN_RELEASE_TIMEOUT_MS = 8_000;
 const SANDBOX_ERROR_RESPONSE_TIMEOUT_MS = 1_000;
 const SANDBOX_SUCCESS_RESPONSE_TIMEOUT_MS = 30_000;
@@ -567,15 +569,17 @@ export class DockerSandboxProvider implements SandboxProvider {
       }
       const files = [];
       while (index < entries.length && entries[index]?.kind === "file" && files.length < 8) {
-        files.push(entries[index]!);
+        const candidate = entries[index]!;
         index += 1;
+        // Skip huge binaries (e.g. .local/bin/node): reading them base64-buffers the
+        // 512m supervisor into OOM and nginx 502. Cap matches MAX_SUPERVISOR_FILE_READ_BYTES.
+        if (candidate.size > MAX_SANDBOX_EXPORT_FILE_BYTES) continue;
+        files.push(candidate);
       }
+      if (files.length === 0) continue;
       const batch = await Promise.all(
         files.map(async (file) => ({
           path: file.path,
-          // The listing already gives us an exact upper bound. Pass it through so
-          // base64-encoded files above the generic 16 MiB sandbox response cap can
-          // still be checkpointed without making unrelated responses unbounded.
           content: await this.readFile(computer, file.path, context, { maxBytes: file.size }),
           executable: file.executable,
         })),
