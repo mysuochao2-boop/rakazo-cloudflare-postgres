@@ -113,8 +113,10 @@ describe("computer lifecycle command guard", () => {
     expect(protectedComputerLifecycleRefusal("eval 'ls'")).toBe("eval");
     expect(protectedComputerLifecycleRefusal('bash <<< "pkill chromium"')).toBe("herestring");
     expect(desktopProtectionGuardMessage("unresolved variable $f")).toBe(
-      "This command was not run: desktop-protection guard: unresolved variable $f. Shell access is still available. Do not stop or restart browser or desktop processes.",
+      "This command was not run: desktop-protection guard: unresolved variable $f. Shell access is still available. Do not stop or restart browser or desktop processes. Avoid for-loops and other commands that expand unresolved $vars. Prefer literal paths and sequential commands (e.g. cat /proc/cpuinfo; free -h; uname -a).",
     );
+    expect(desktopProtectionGuardMessage("subshell")).toContain("Avoid unquoted parentheses");
+    expect(desktopProtectionGuardMessage("command substitution")).toContain("Avoid $(...)");
   });
 
   it("allows comments, literal assignments, activate scripts, and quoted heredoc data", () => {

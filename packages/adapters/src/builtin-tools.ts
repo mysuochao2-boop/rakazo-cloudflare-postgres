@@ -297,7 +297,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "shell",
     description:
-      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output.",
+      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. On a graphical computer, desktop-protection refuses opaque shell syntax (unquoted parentheses, $(...), unresolved $vars, interpreter heredocs); use simple sequential commands instead.",
     inputSchema: {
       type: "object",
       properties: {
