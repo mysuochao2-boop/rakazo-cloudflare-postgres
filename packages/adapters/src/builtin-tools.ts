@@ -6,6 +6,7 @@ import {
   SecretHttpRequest,
 } from "@rakazo/contracts";
 import { z } from "zod";
+import { backgroundTaskTools } from "./background-tasks.js";
 import { allowPrivateHttpSecretOrigins } from "./bot-secrets.js";
 
 // The owner flag can land in process.env after static imports run (loadRootEnv
@@ -1068,6 +1069,8 @@ export const builtinAgentTools: ConnectorTool[] = [
       required: ["message"],
     },
   },
+  // Exposed only when RAKAZO_BACKGROUND_TASKS is on (see selectBuiltinToolsForRun).
+  ...backgroundTaskTools,
 ];
 
 /** Agent-connection tools, exposed only when the messaging surface is enabled. */

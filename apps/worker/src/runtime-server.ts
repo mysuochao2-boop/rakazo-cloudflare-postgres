@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import type { BackgroundJobHandlers } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import type { Logger } from "@rakazo/logging";
+import { backgroundLaneCapacity, RuntimeLaneSlots } from "./runtime-lanes.js";
 
 export interface BotRuntimeServer {
   port: number;
@@ -20,14 +21,41 @@ export async function startBotRuntimeServer(options: {
   logger: Logger;
   callbackUrl?: string;
   abortRun?: (runId: string) => Promise<void>;
+  /** Background lane slots; default from RAKAZO_BACKGROUND_TASKS (0 = single shared slot). */
+  backgroundLanes?: number;
+  heartbeatMs?: number;
 }): Promise<BotRuntimeServer> {
-  let active: { runId: string; task: Promise<void> } | undefined;
+  const slots = new RuntimeLaneSlots<Promise<void>>(
+    options.backgroundLanes ?? backgroundLaneCapacity(process.env),
+  );
+  // Long background runs outlive the edge's busy timeout unless the runtime reports in.
+  const heartbeat = setInterval(
+    () => {
+      const occupancy = slots.occupancy();
+      const first = occupancy.background[0];
+      if (!first || !options.callbackUrl) return;
+      void notifyFinished(
+        options.callbackUrl,
+        options.token,
+        options.botId,
+        first,
+        slots.active.size,
+      ).catch((error) => options.logger.error("bot runtime heartbeat failed", error));
+    },
+    options.heartbeatMs ?? 10 * 60_000,
+  );
+  heartbeat.unref?.();
 
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://runtime.internal");
       if (request.method === "GET" && url.pathname === "/health") {
-        json(response, 200, { ok: true, activeRunId: active?.runId ?? null });
+        const occupancy = slots.occupancy();
+        json(response, 200, {
+          ok: true,
+          activeRunId: occupancy.interactive[0] ?? occupancy.background[0] ?? null,
+          lanes: occupancy,
+        });
         return;
       }
       const match = /^\/runs\/([^/]+)\/continue$/.exec(url.pathname);
@@ -40,16 +68,13 @@ export async function startBotRuntimeServer(options: {
         return;
       }
       const runId = decodeURIComponent(match[1]!);
-      if (active) {
-        json(response, active.runId === runId ? 202 : 409, {
-          accepted: active.runId === runId,
-          activeRunId: active.runId,
-        });
+      if (slots.has(runId)) {
+        json(response, 202, { accepted: true, activeRunId: runId });
         return;
       }
       const run = await options.prisma.run.findUnique({
         where: { id: runId },
-        select: { botId: true },
+        select: { botId: true, lane: true },
       });
       if (!run) {
         json(response, 404, { error: "run_not_found" });
@@ -59,20 +84,36 @@ export async function startBotRuntimeServer(options: {
         json(response, 409, { error: "bot_mismatch" });
         return;
       }
+      // Acquire synchronously after the lookup so two deliveries cannot both pass.
+      const acquired = slots.tryAcquire(runId, run.lane);
+      if (!acquired.ok) {
+        json(response, acquired.duplicate ? 202 : 409, {
+          accepted: acquired.duplicate,
+          lane: acquired.lane,
+          activeRunId: acquired.activeRunIds[0] ?? null,
+          activeRunIds: acquired.activeRunIds,
+        });
+        return;
+      }
 
       const task = options.handlers["run.continue"]({ runId })
         .catch((error) => options.logger.error("bot runtime execution failed", error, { runId }))
         .finally(async () => {
-          active = undefined;
+          slots.release(runId);
           if (options.callbackUrl) {
-            await notifyFinished(options.callbackUrl, options.token, options.botId, runId).catch(
-              (error) =>
-                options.logger.error("bot runtime completion callback failed", error, { runId }),
+            await notifyFinished(
+              options.callbackUrl,
+              options.token,
+              options.botId,
+              runId,
+              slots.active.size,
+            ).catch((error) =>
+              options.logger.error("bot runtime completion callback failed", error, { runId }),
             );
           }
         });
-      active = { runId, task };
-      json(response, 202, { accepted: true, runId });
+      slots.attach(runId, task);
+      json(response, 202, { accepted: true, runId, lane: slots.laneOf(run.lane) });
     } catch (error) {
       options.logger.error("bot runtime request failed", error);
       json(response, 500, { error: "internal_error" });
@@ -96,8 +137,14 @@ export async function startBotRuntimeServer(options: {
           else resolve();
         });
       });
-      if (active && options.abortRun) await options.abortRun(active.runId).catch(() => undefined);
-      await Promise.all([closed, active?.task]);
+      clearInterval(heartbeat);
+      const running = [...slots.active.values()];
+      if (options.abortRun) {
+        await Promise.all(
+          running.map((slot) => options.abortRun!(slot.runId).catch(() => undefined)),
+        );
+      }
+      await Promise.all([closed, ...running.map((slot) => slot.task)]);
     },
   };
 }
@@ -107,11 +154,13 @@ async function notifyFinished(
   token: string,
   botId: string,
   runId: string,
+  activeRuns = 0,
 ): Promise<void> {
   const response = await fetch(callbackUrl, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ botId, runId }),
+    // activeRuns > 0 tells the edge to keep the busy timeout (other lanes still working).
+    body: JSON.stringify({ botId, runId, activeRuns }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Runtime completion callback returned ${response.status}`);

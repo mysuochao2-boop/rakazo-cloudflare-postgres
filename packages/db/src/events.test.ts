@@ -2484,6 +2484,55 @@ describe("sendUserMessage", () => {
   });
 });
 
+describe("sendUserMessage lanes", () => {
+  it("only looks for active runs on the interactive lane", async () => {
+    const tx = {
+      thread: {
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ nextMessageSeq: 5 })
+          .mockResolvedValueOnce({ nextEventSeq: 9 }),
+      },
+      message: {
+        create: vi.fn().mockResolvedValue({ id: "message-1", seq: 4 }),
+        update: vi.fn().mockResolvedValue({ id: "message-1" }),
+      },
+      steeringMessage: { create: vi.fn() },
+      task: { create: vi.fn().mockResolvedValue({ id: "task-new" }) },
+      run: {
+        // A running background-lane run is filtered out by the query itself.
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
+        create: vi.fn().mockResolvedValue({ id: "run-new", taskId: "task-new" }),
+      },
+      event: {
+        create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
+          ...event(data.seq),
+          type: data.type,
+        })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    await expect(
+      sendUserMessage(prisma, {
+        spaceId: "workspace-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        userId: "user-1",
+        blocks: [{ kind: "text", text: "hello" }],
+        prompt: "hello",
+        trigger: "user",
+      }),
+    ).resolves.toMatchObject({ runId: "run-new" });
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ lane: "interactive" }) }),
+    );
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("claimSteering", () => {
   it("claims pending messages for the fenced run in message order", async () => {
     const tx = {

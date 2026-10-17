@@ -43,6 +43,8 @@ export const RunActivityRowSchema = z.object({
     "messaging",
     "cloud_agent",
     "created",
+    "background_task",
+    "background_wake",
   ]),
   notificationsEnabled: z.boolean(),
   promptSnippet: z.string(),

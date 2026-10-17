@@ -628,6 +628,9 @@ model Run {
   leaseExpiresAt       DateTime?
   checkpoint           String?
   clientNonce          String?
+  /// interactive | background. Background runs never take user steering.
+  lane                 String           @default("interactive")
+  backgroundTaskId     String?
   sourceMessageId      String?
   sourceMessage        Message?         @relation("RunSourceMessage", fields: [sourceMessageId], references: [id], onDelete: SetNull)
   routineId            String?
@@ -656,6 +659,7 @@ model Run {
   @@index([sourceMessageId])
   @@index([threadId, status, createdAt])
   @@index([routineId])
+  @@index([botId, lane, status])
   @@map("runs")
 }
 
@@ -720,6 +724,45 @@ model RunTranscript {
 
   @@index([threadId, createdAt])
   @@map("run_transcripts")
+}
+
+/// A long-running headless task executed as its own Run on the bot's background lane.
+/// Completion inserts a hidden wake run (generation/wakeGeneration dedupe, like CloudAgent).
+model BackgroundTask {
+  id             String    @id @default(cuid())
+  operationKey   String?   @unique
+  spaceId        String
+  botId          String
+  threadId       String
+  userId         String
+  parentRunId    String?
+  runId          String?   @unique
+  title          String
+  instructions   String    @db.Text
+  /// queued | running | waiting_input | completed | failed | cancelled
+  status         String    @default("queued")
+  progress       String?
+  resultSummary  String?   @db.Text
+  error          String?
+  toolProfile    String    @default("headless")
+  stepCap        Int
+  wallCapMs      Int
+  stepsUsed      Int       @default(0)
+  notifyMode     String    @default("wake")
+  cancelRequested Boolean  @default(false)
+  generation     Int       @default(0)
+  wakeGeneration Int       @default(-1)
+  /// Pending instructions appended by the parent bot; consumed at the next turn boundary.
+  inbox          Json      @default("[]")
+  createdAt      DateTime  @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@index([botId, status])
+  @@index([spaceId, status])
+  @@index([threadId, createdAt])
+  @@map("background_tasks")
 }
 
 model CloudAgent {

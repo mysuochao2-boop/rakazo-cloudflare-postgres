@@ -18,7 +18,10 @@ import {
   sanitizeJsonValue,
 } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
-import { cancelRunsInTransaction } from "./cancel-runs.js";
+import {
+  cancelBackgroundTasksForThreadInTransaction,
+  cancelRunsInTransaction,
+} from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import {
@@ -292,6 +295,8 @@ export async function clearThread(
     const now = new Date();
     const runIds = activeRuns.map((run) => run.id);
     await cancelRunsInTransaction(tx, activeRuns, now);
+    // Clearing the thread also stops its background tasks (their runs are cancelled above).
+    await cancelBackgroundTasksForThreadInTransaction(tx, input.threadId, now);
     // Expire as tombstones so a still-open provider screen claim cannot reset fencing to 1.
     await expireComputerExecutionLeases(tx, { runId: { in: runIds } });
     await tx.computer.updateMany({
@@ -406,6 +411,9 @@ export async function sendUserMessage(
               where: {
                 threadId: input.threadId,
                 botId: input.botId,
+                // User messages only ever steer or queue behind the interactive lane; a
+                // background-lane run never absorbs (or holds) the conversation.
+                lane: "interactive",
                 status: {
                   in: ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
                 },
@@ -1234,6 +1242,7 @@ export async function createPendingSteeringRun(
     where: {
       threadId: input.threadId,
       botId: input.botId,
+      lane: "interactive",
       status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
     },
     select: { id: true },
