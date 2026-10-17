@@ -294,6 +294,9 @@ const SettingsOverlay = lazyOverlay(() =>
 const PeerMessagesOverlay = lazyOverlay(() =>
   import("./PeerMessagesOverlay").then((module) => module.PeerMessagesOverlay),
 );
+const BotRuntimeLogsDrawer = lazyOverlay(() =>
+  import("./BotRuntimeLogsDrawer").then((module) => module.BotRuntimeLogsDrawer),
+);
 const PluginsOverlay = lazyOverlay(() =>
   import("./PluginsOverlay").then((module) => module.PluginsOverlay),
 );
@@ -476,6 +479,17 @@ export function ShellPage() {
     peerBotId: string;
     peerBotName: string;
   } | null>(null);
+  // Live runtime logs (RAKAZO_BOT_LIVE_LOGS): the menu item appears only when the server has it on.
+  const [liveLogsEnabled, setLiveLogsEnabled] = useState(false);
+  const [runtimeLogsBotId, setRuntimeLogsBotId] = useState<string | null>(null);
+  useEffect(() => {
+    const abort = new AbortController();
+    void rpc.bots.logs
+      .enabled(undefined, { signal: abort.signal })
+      .then((result) => setLiveLogsEnabled(result.enabled))
+      .catch(() => undefined);
+    return () => abort.abort();
+  }, []);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [routinesBotId, setRoutinesBotId] = useState<string | null>(null);
   const [taughtSkills, setTaughtSkills] = useState<TaughtSkill[]>([]);
@@ -4176,6 +4190,14 @@ export function ShellPage() {
               setRestoredPanelKey(destKey);
               setBotMenu(null);
             }}
+            onRuntimeLogs={
+              liveLogsEnabled && contextBot
+                ? () => {
+                    setBotMenu(null);
+                    setRuntimeLogsBotId(contextBot.id);
+                  }
+                : undefined
+            }
             onDuplicate={() => {
               setBotMenu(null);
               const request = contextBot
@@ -4544,6 +4566,19 @@ export function ShellPage() {
             }}
           />
         ) : null}
+        {runtimeLogsBotId
+          ? (() => {
+              const logsBot = bots.find((bot) => bot.id === runtimeLogsBotId);
+              return logsBot ? (
+                <BotRuntimeLogsDrawer
+                  botId={logsBot.id}
+                  botName={logsBot.name}
+                  botColor={logsBot.color}
+                  onClose={() => setRuntimeLogsBotId(null)}
+                />
+              ) : null;
+            })()
+          : null}
         {peerConversation && active ? (
           <PeerMessagesOverlay
             botId={active.id}

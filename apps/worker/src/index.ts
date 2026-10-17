@@ -53,8 +53,14 @@ import {
   realtimeFanoutFromEnv,
   runDispatcherFromEnv,
 } from "@rakazo/adapters-cloudflare";
-import { resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
+  botLiveLogsEnabled,
+  resolveEncryptionKey,
+  resolveSupervisorToken,
+  setRuntimeLogTap,
+} from "@rakazo/core";
+import {
+  createBotRuntimeLogWriter,
   createDb,
   createThreadEvents,
   isTooManyDatabaseConnections,
@@ -104,6 +110,14 @@ async function main() {
   const events = createThreadEvents(prisma, realtime, {
     runSecretWriter: createRunSecretWriter(secrets),
   });
+  // RAKAZO_BOT_LIVE_LOGS: mirror redacted run milestones from this process.
+  const liveLogs = botLiveLogsEnabled() ? createBotRuntimeLogWriter(prisma, realtime) : undefined;
+  if (liveLogs) setRuntimeLogTap(liveLogs.tap);
+  const closeLiveLogs = async () => {
+    if (!liveLogs) return;
+    setRuntimeLogTap(undefined);
+    await liveLogs.close();
+  };
   const dataDir = process.env.DATA_DIR ?? "./data";
   const runtime =
     process.env.AGENT_RUNTIME === "scripted"
@@ -273,6 +287,7 @@ async function main() {
         await runtimeServer.close();
         await jobs.close();
         await secrets.close();
+        await closeLiveLogs();
         await realtime.close();
         await connector.stop();
         await mcp.close();
@@ -334,6 +349,7 @@ async function main() {
       await jobHost.stop();
       await jobs.close();
       await secrets.close();
+      await closeLiveLogs();
       await realtime.close();
       await connector.stop();
       await mcp.close();
