@@ -84,7 +84,7 @@ describe("replayTranscript", () => {
     ]);
     for (const c of calls) {
       expect(c.id).toMatch(/^rk_[A-Za-z0-9_-]+$/);
-      expect(c.id.length).toBeLessThanOrEqual(64);
+      expect(c.id!.length).toBeLessThanOrEqual(64);
     }
     expect(out[1]).toMatchObject({ toolCallId: calls[0]!.id, content: [{ text: "file-a" }] });
     expect(out[2]).toMatchObject({
@@ -350,7 +350,7 @@ describe("structured history provider fallback", () => {
     const seen: unknown[][] = [];
     const out = structuredHistoryFallbackStream(
       state,
-      { systemPrompt: "s", messages: [structuredMsg, live] as never },
+      { messages: [structuredMsg, live] } as never,
       (ctx) => {
         seen.push(ctx.messages);
         return streamOf(seen.length === 1 ? "fail" : "ok");
@@ -365,7 +365,7 @@ describe("structured history provider fallback", () => {
     const next: unknown[][] = [];
     const again = structuredHistoryFallbackStream(
       state,
-      { systemPrompt: "s", messages: [structuredMsg, live] as never },
+      { messages: [structuredMsg, live] } as never,
       (ctx) => {
         next.push(ctx.messages);
         return streamOf("ok");
@@ -380,7 +380,7 @@ describe("structured history provider fallback", () => {
     let calls = 0;
     const out = structuredHistoryFallbackStream(
       state,
-      { systemPrompt: "s", messages: [structuredMsg, live] as never },
+      { messages: [structuredMsg, live] } as never,
       () => {
         calls += 1;
         return streamOf("fail", "503 overloaded");
