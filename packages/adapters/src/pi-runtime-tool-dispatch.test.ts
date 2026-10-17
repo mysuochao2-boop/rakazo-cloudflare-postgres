@@ -2019,3 +2019,98 @@ describe("Pi connector tool dispatch", () => {
     );
   });
 });
+
+describe("Pi turn limits (RAKAZO_TURN_LIMITS)", () => {
+  const keys = [
+    "RAKAZO_TURN_LIMITS",
+    "RAKAZO_TURN_MAX_STEPS",
+    "RAKAZO_BACKGROUND_MAX_STEPS",
+    "MAX_TOOL_CALLS_PER_TURN",
+  ] as const;
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  beforeEach(() => {
+    for (const key of keys) delete process.env[key];
+    fakeAgentState.mode = "parent-limit";
+    fakeAgentState.abortCount = 0;
+  });
+  afterEach(() => {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  async function runLoop(runId: string, lane?: "interactive" | "background") {
+    const executeTool = vi.fn(async () => ({ ok: true }));
+    const events: unknown[] = [];
+    for await (const event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId,
+        prompt: "keep going",
+        instructions: "Use shell.",
+        history: [],
+        tools: [shellTool],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool,
+        lane,
+      },
+      {
+        operationId: runId,
+        traceId: runId,
+        spaceId: "w",
+        userId: "u",
+        signal: new AbortController().signal,
+      },
+    )) {
+      events.push(event);
+    }
+    return { executeTool, events };
+  }
+
+  it("is inert when off (default)", async () => {
+    const { executeTool } = await runLoop("limits-off");
+    expect(executeTool).toHaveBeenCalledTimes(100);
+  });
+
+  it("observe mode only logs and never stops the turn", async () => {
+    process.env.RAKAZO_TURN_LIMITS = "observe";
+    process.env.RAKAZO_TURN_MAX_STEPS = "5";
+    const { executeTool, events } = await runLoop("limits-observe");
+    expect(executeTool).toHaveBeenCalledTimes(100);
+    expect(fakeAgentState.abortCount).toBe(0);
+    expect(JSON.stringify(events)).not.toContain("steps (tool calls)");
+  });
+
+  it("enforce mode stops at the interactive step limit with a soft final message", async () => {
+    process.env.RAKAZO_TURN_LIMITS = "enforce";
+    process.env.RAKAZO_TURN_MAX_STEPS = "5";
+    const { executeTool, events } = await runLoop("limits-enforce");
+    expect(executeTool).toHaveBeenCalledTimes(5);
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      text: "I stopped after reaching the limit of 5 steps (tool calls) in this turn. Send another message to continue.",
+    });
+  });
+
+  it("enforce mode uses the background step limit for background lane runs", async () => {
+    process.env.RAKAZO_TURN_LIMITS = "enforce";
+    process.env.RAKAZO_TURN_MAX_STEPS = "5";
+    process.env.RAKAZO_BACKGROUND_MAX_STEPS = "7";
+    const { executeTool } = await runLoop("limits-background", "background");
+    expect(executeTool).toHaveBeenCalledTimes(7);
+  });
+
+  it("keeps the stricter MAX_TOOL_CALLS_PER_TURN fuse", async () => {
+    process.env.RAKAZO_TURN_LIMITS = "enforce";
+    process.env.RAKAZO_TURN_MAX_STEPS = "50";
+    process.env.MAX_TOOL_CALLS_PER_TURN = "3";
+    const { executeTool, events } = await runLoop("limits-fuse");
+    expect(executeTool).toHaveBeenCalledTimes(3);
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      text: "I stopped after reaching the limit of 3 tool calls in this turn. Send another message to continue.",
+    });
+  });
+});
