@@ -257,6 +257,11 @@ import {
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
+import {
+  DEFAULT_RUN_CHECKPOINT_TIMEOUT_MS,
+  runCheckpointTimeoutMs,
+  withDeadline,
+} from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import { handoffToGroupBot, loadGroupContext } from "./group-handoff.js";
 import {
@@ -450,9 +455,18 @@ const COMPUTER_REQUIRED_TOOL_NAMES = new Set([
   "write_file",
 ]);
 
-/** Avoid an expensive remote workspace export when a turn never touched the computer. */
-export function createRunWorkspaceCheckpoint(checkpoint: () => Promise<unknown>) {
+/**
+ * Avoid an expensive remote workspace export when a turn never touched the computer.
+ * The export walks the whole home one file at a time (a toolchain install is ~85k files),
+ * so it is bounded: past `timeoutMs` the export is aborted and left to the computer's
+ * idle/sleep checkpoint instead of holding the run open with a renewing lease forever.
+ */
+export function createRunWorkspaceCheckpoint(
+  checkpoint: (signal: AbortSignal) => Promise<unknown>,
+  options: { timeoutMs?: number; onTimeout?: (timeoutMs: number) => void } = {},
+) {
   let dirty = false;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_RUN_CHECKPOINT_TIMEOUT_MS;
   return {
     markDirty() {
       dirty = true;
@@ -464,7 +478,16 @@ export function createRunWorkspaceCheckpoint(checkpoint: () => Promise<unknown>)
       if (!dirty) return false;
       dirty = false;
       try {
-        await checkpoint();
+        const outcome = await withDeadline(
+          timeoutMs,
+          (signal) => checkpoint(signal),
+          "workspace checkpoint timed out",
+        );
+        if (!outcome.ok) {
+          // Deferred, not retried in this run: a retry would hit the same wall.
+          options.onTimeout?.(timeoutMs);
+          return false;
+        }
         return true;
       } catch (error) {
         dirty = true;
@@ -3813,10 +3836,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
           screenRelease = { computer, context };
           scheduleComputerSleep(deps.jobs, storedComputer.id);
         }
-        const workspaceCheckpoint = createRunWorkspaceCheckpoint(() =>
-          computerAvailable
-            ? checkpointRunComputerWorkspace(deps, storedComputer, computer, context)
-            : Promise.resolve(),
+        const workspaceCheckpoint = createRunWorkspaceCheckpoint(
+          (signal) =>
+            computerAvailable
+              ? checkpointRunComputerWorkspace(deps, storedComputer, computer, {
+                  ...context,
+                  signal: AbortSignal.any([context.signal, signal]),
+                })
+              : Promise.resolve(),
+          {
+            timeoutMs: runCheckpointTimeoutMs(),
+            onTimeout: (ms) => {
+              getLogger().warn("run.checkpoint_timeout", { runId: run.id, lane: runLane, ms });
+              logRunTiming("run.checkpoint_timeout", { runId: run.id, threadId: run.threadId, ms });
+            },
+          },
         );
         let currentTurnFiles: Awaited<ReturnType<typeof materializeCurrentTurnFiles>>;
         try {

@@ -43,6 +43,7 @@ import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
 import { shortenToolResultText } from "./context-selection.js";
+import { transcriptWriteTimeoutMs, withDeadline } from "./deadline.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -245,7 +246,19 @@ export class PiAgentRuntime implements AgentRuntime {
         if (transcriptFlushed || !request.onTranscript || !transcriptCapture) return;
         transcriptFlushed = true;
         try {
-          await request.onTranscript(transcriptCapture());
+          const capture = transcriptCapture();
+          const onTranscript = request.onTranscript;
+          const ms = transcriptWriteTimeoutMs();
+          const outcome = await withDeadline(
+            ms,
+            async () => {
+              await onTranscript(capture);
+            },
+            "run transcript write timed out",
+          );
+          if (!outcome.ok) {
+            getLogger().warn("Run transcript write timed out", { runId: request.runId, ms });
+          }
         } catch (error) {
           getLogger().warn("Run transcript could not be recorded", { runId: request.runId, error });
         }
