@@ -79,6 +79,7 @@ import {
   messagingDmSurfaceNote,
   nextCronDateAcross,
   nextFence,
+  parallelToolGuidanceEnabled,
   planActionGate,
   promptInvokesSkill,
   redactSecrets,
@@ -88,6 +89,7 @@ import {
   type ToolCallStreak,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
+  transcriptWriteEnabled,
   truncatedPlainText,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
@@ -318,6 +320,7 @@ import {
   tryCompleteConnectionWithCode,
 } from "./run-secret.js";
 import { logRunTiming } from "./run-timing.js";
+import { recordRunTranscript } from "./run-transcript-store.js";
 import { withRuntimeCleanup } from "./runtime-stream.js";
 import {
   cancelScheduleFromTool,
@@ -6524,6 +6527,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 taughtSkillsLine,
                 replyGuidance: runReplyGuidance(run.trigger),
                 disabledBuiltinTools,
+                parallelToolGuidance: parallelToolGuidanceEnabled(),
               })
                 .filter((instruction): instruction is string => Boolean(instruction))
                 .join("\n\n"),
@@ -6629,6 +6633,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   completion,
                   runSecrets,
                 ),
+              onTranscript:
+                scripted || !transcriptWriteEnabled()
+                  ? undefined
+                  : (transcript) =>
+                      recordRunTranscript(deps.prisma, {
+                        runId,
+                        threadId: thread.id,
+                        botId: bot.id,
+                        transcript,
+                        secrets: runSecrets,
+                      }),
               claimSteering: scripted
                 ? undefined
                 : async (seenIds) => {
@@ -7763,6 +7778,17 @@ function toolUsageLine(parts: {
   return `${parts.computerInstruction} ${clauses.join(" ")}`;
 }
 
+export const PARALLEL_TOOL_GUIDANCE =
+  "When several tool calls do not depend on each other (web searches, page or file reads, connector lookups, status checks), issue them together in one reply so they run in parallel instead of one per turn. Call tools one at a time only when a later call needs an earlier result or when they change the same state.";
+export const COMPUTER_BATCH_GUIDANCE =
+  "For predictable desktop sequences (click a field, type, press Enter, scroll), put all steps in one computer_act call with observe:false and observe only when you need to see the outcome. Never issue computer_observe or computer_act calls in parallel with each other.";
+
+export function parallelToolGuidanceLine(computerInstruction: string): string {
+  return computerInstruction.includes("computer_act")
+    ? `${PARALLEL_TOOL_GUIDANCE} ${COMPUTER_BATCH_GUIDANCE}`
+    : PARALLEL_TOOL_GUIDANCE;
+}
+
 // Ordering matters: stable blocks first, volatile ones last, so the prefix stays cacheable.
 export function userTurnInstructions(parts: {
   botInstructions: string;
@@ -7783,6 +7809,8 @@ export function userTurnInstructions(parts: {
   taughtSkillsLine: string | undefined;
   replyGuidance: string;
   disabledBuiltinTools?: ReadonlySet<string>;
+  /** RAKAZO_PARALLEL_TOOL_GUIDANCE: parallel tool calls and computer_act batching. */
+  parallelToolGuidance?: boolean;
 }): (string | undefined)[] {
   return [
     parts.botInstructions,
@@ -7792,6 +7820,7 @@ export function userTurnInstructions(parts: {
       ? "For questions about an earlier discussion, first check the visible conversation. Answer follow-ups from facts already present in original messages or prior source-verified replies when no later visible correction changes them; do not repeat retrieval solely because the user asks again. Use search_history when necessary evidence is missing or uncertain. Start with the project name alone, or one distinctive topic word if no project is named, then use read_history to check surrounding messages, outcomes, and later corrections before claiming exact recall. Verify that matches contain source statements answering the question. If matches lack the requested fact and nextSearch is present, call search_history with those arguments. Coverage applies only to the requested query and range. Empty narrower queries do not exhaust the broader topic query’s matches. Do not claim evidence is unavailable while that broader search still has an unexplored cursor. If a search is empty, try the single project or topic word before concluding the evidence is missing. If the requested fact remains absent, say so briefly without volunteering adjacent facts. If multiple projects match and none is selected, ask which project before giving candidate facts. Historical snapshots are navigation aids, not authoritative facts or approvals."
       : undefined,
     toolUsageLine(parts),
+    parts.parallelToolGuidance ? parallelToolGuidanceLine(parts.computerInstruction) : undefined,
     parts.taskCatalogInstruction,
     parts.workspaceInstruction,
     parts.agentEnvironmentInstruction,

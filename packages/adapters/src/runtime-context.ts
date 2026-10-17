@@ -25,6 +25,8 @@ const messageHash = (message: Message) =>
 interface OriginalMetadata {
   rakazoHistory?: boolean;
   rakazoMessageId?: string;
+  /** Consecutive assistant turns merged into one role:"assistant" history message. */
+  rakazoMessageIds?: string[];
   rakazoCreatedAt?: string;
 }
 function text(message: Message): string {
@@ -94,13 +96,19 @@ export function createRuntimeContextPolicy(
   );
   function original(message: Message) {
     const metadata = message as Message & OriginalMetadata;
-    if (metadata.rakazoMessageId) return historyById.get(metadata.rakazoMessageId);
+    // Metadata is authoritative. It covers both history formats: the legacy
+    // pseudo-user "Assistant: " text and the role:"assistant" replay
+    // (RAKAZO_HISTORY_ASSISTANT_ROLE), including merged consecutive turns.
+    const id = metadata.rakazoMessageIds?.[0] ?? metadata.rakazoMessageId;
+    if (id) return historyById.get(id);
     if (metadataPresent && !metadata.rakazoHistory) return undefined;
     const content = text(message);
     return request.history.find(
       (stored) =>
         content === stored.content ||
-        (stored.role === "assistant" && content === `Assistant: ${stored.content}`),
+        (stored.role === "assistant" &&
+          message.role !== "assistant" &&
+          content === `Assistant: ${stored.content}`),
     );
   }
   function navigation(ids: string[]): Message | undefined {

@@ -19,6 +19,7 @@ import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-s
 import type {
   AdapterContext,
   AgentRunRequest,
+  AgentRunTranscript,
   AgentRuntime,
   AgentRuntimeEvent,
   AgentSteeringMessage,
@@ -30,6 +31,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
 import { usableModelId } from "@rakazo/contracts";
+import { historyAssistantRoleEnabled, toolTelemetryEnabled } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
@@ -70,6 +72,14 @@ import { createRuntimeContextPolicy } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
 import { textContentArg } from "./tool-text.js";
+import {
+  effectiveToolCallLimit,
+  resolveTurnLimits,
+  stepLimitMessage,
+  ToolBatchStats,
+  TurnLimitObserver,
+  wallClockLimitMessage,
+} from "./turn-limits.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
 interface ToolCallBudget {
@@ -217,6 +227,19 @@ export class PiAgentRuntime implements AgentRuntime {
     const work = (async () => {
       let trackedBudget: ToolCallBudget | undefined;
       let resumeHost: ToolHost | undefined;
+      let hostTurnObserver: TurnLimitObserver | undefined;
+      let transcriptCapture: (() => AgentRunTranscript) | undefined;
+      let transcriptFlushed = false;
+      // Best effort and write-only: a transcript failure never changes the run outcome.
+      const flushTranscript = async () => {
+        if (transcriptFlushed || !request.onTranscript || !transcriptCapture) return;
+        transcriptFlushed = true;
+        try {
+          await request.onTranscript(transcriptCapture());
+        } catch (error) {
+          getLogger().warn("Run transcript could not be recorded", { runId: request.runId, error });
+        }
+      };
       try {
         const selectedModel = resolveRuntimeModel(request.model);
         if (!selectedModel.model) {
@@ -231,7 +254,18 @@ export class PiAgentRuntime implements AgentRuntime {
         const toolDefs = request.tools;
         const nestedAgents = new Set<Agent>();
         const completionModel = modelForCompletion(model, request.model.maxTokens);
-        trackedBudget = toolCallBudgetFor(request.runId);
+        const turnLimits = resolveTurnLimits(request.lane, request.turnLimitOverrides);
+        const fuseLimit = maxToolCallsPerTurn();
+        const toolCallLimit = effectiveToolCallLimit(fuseLimit, turnLimits);
+        trackedBudget = toolCallBudgetFor(request.runId, toolCallLimit);
+        const stepLimitApplied = toolCallLimit !== fuseLimit;
+        const turnObserver = new TurnLimitObserver(
+          turnLimits,
+          request.runId,
+          request.lane ?? "interactive",
+          (event) => getLogger().warn("agent.turn_limit", { ...event }),
+        );
+        const batchStats = toolTelemetryEnabled() ? new ToolBatchStats() : undefined;
         const initialModelTarget: RuntimeModelTarget = {
           config: request.model,
           models,
@@ -252,6 +286,7 @@ export class PiAgentRuntime implements AgentRuntime {
           nestedAgents,
           subagentGate: createGate(MAX_PARALLEL_SUBAGENTS),
           toolCallBudget: trackedBudget,
+          turnObserver,
           toolCallSeq: { value: 0 },
           abortTurn: () => undefined,
           signal,
@@ -260,6 +295,7 @@ export class PiAgentRuntime implements AgentRuntime {
           pendingShells: [],
         };
         resumeHost = host;
+        hostTurnObserver = turnObserver;
         const tools = toAgentTools(toolDefs, host);
         const seenSteeringIds: string[] = [];
         const initialSteering = request.claimSteering ? await request.claimSteering([]) : [];
@@ -268,6 +304,7 @@ export class PiAgentRuntime implements AgentRuntime {
           withoutSteeringMessages(request.history, initialSteering),
           request.prompt,
           request.sourceMessageId,
+          historyAssistantRoleEnabled() ? completionModel : undefined,
         );
         const initialPrompt = initialSteering.length
           ? `${request.prompt}\n\nAdditional user context:\n${initialSteering
@@ -472,6 +509,21 @@ export class PiAgentRuntime implements AgentRuntime {
           return;
         }
         signal.addEventListener("abort", onAbort);
+        turnObserver.startWallClock(
+          () => host.toolCallBudget.count,
+          () => {
+            host.toolCallBudget.exceeded = true;
+            queue.push({ type: "progress", text: "Stopped: turn time limit reached." });
+            onAbort();
+          },
+        );
+        const transcriptStart = agent.state.messages.length;
+        transcriptCapture = () => ({
+          provider: activeStreamTarget.model.provider,
+          modelId: activeStreamTarget.model.id,
+          api: activeStreamTarget.model.api,
+          messages: transcriptMessages(agent.state.messages.slice(transcriptStart), tools),
+        });
 
         let streamed = "";
         let currentMessageStreamed = "";
@@ -485,6 +537,8 @@ export class PiAgentRuntime implements AgentRuntime {
         agent.subscribe(async (event) => {
           if (event.type === "message_end") {
             await piSession?.appendMessage(event.message);
+            if (event.message.role === "assistant")
+              batchStats?.recordAssistant(event.message.content);
           }
           if (event.type === "tool_execution_start") {
             if (host.toolCallBudget.exceeded) return;
@@ -626,7 +680,11 @@ export class PiAgentRuntime implements AgentRuntime {
           }
         }
         if (budgetExceeded) {
-          const budgetMessage = toolCallBudgetExceededMessage(host.toolCallBudget.limit);
+          const budgetMessage = turnObserver.wallExceeded
+            ? wallClockLimitMessage(turnLimits.maxWallMs)
+            : stepLimitApplied
+              ? stepLimitMessage(host.toolCallBudget.limit)
+              : toolCallBudgetExceededMessage(host.toolCallBudget.limit);
           if (streamed.trim()) {
             const suffix = `\n\n${budgetMessage}`;
             queue.push({ type: "text", text: suffix });
@@ -656,11 +714,23 @@ export class PiAgentRuntime implements AgentRuntime {
             queue.push({ type: "text", text: streamed });
           }
         }
+        if (batchStats) {
+          getLogger().info("agent.tool_stats", {
+            runId: request.runId,
+            lane: request.lane ?? "interactive",
+            steps: host.toolCallBudget.count,
+            wallMs: Date.now() - turnObserver.startedAt,
+            ...batchStats.summary(),
+          });
+        }
+        await flushTranscript();
         queue.push(streamed.trim() ? { type: "done", text: streamed } : { type: "done" });
       } catch (error) {
+        await flushTranscript();
         const message = sanitizeError(error instanceof Error ? error.message : String(error));
         queue.fail(new Error(message));
       } finally {
+        hostTurnObserver?.stop();
         queue.close();
         if (trackedBudget) {
           const keepForResume =
@@ -957,11 +1027,13 @@ function stableToolNameHash(name: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function toHistory(
+export function toHistory(
   history: AgentRunRequest["history"],
   prompt: string,
   sourceMessageId?: string | null,
-) {
+  /** When set, prior assistant turns replay as role "assistant" attributed to this model. */
+  assistantModel?: Model<Api>,
+): AgentMessage[] {
   let duplicatePromptIndex = -1;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const message = history[index];
@@ -977,20 +1049,103 @@ function toHistory(
     duplicatePromptIndex < 0
       ? history
       : history.filter((_, index) => index !== duplicatePromptIndex);
-  return prior
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => {
-      const text = m.role === "assistant" ? `Assistant: ${m.content}` : m.content;
-      const images = m.role === "assistant" ? [] : toPiImages(m.images);
-      return {
-        role: "user" as const,
-        content: images.length ? [{ type: "text" as const, text }, ...images] : text,
-        timestamp: Date.now(),
-        rakazoHistory: true,
-        rakazoMessageId: m.id,
-        rakazoCreatedAt: m.createdAt,
-      };
-    });
+  const conversational = prior.filter((m) => m.role === "user" || m.role === "assistant");
+  if (!assistantModel) return conversational.map(pseudoUserHistoryMessage);
+  const result: AgentMessage[] = [];
+  let seenUser = false;
+  for (const m of conversational) {
+    if (m.role === "user") {
+      seenUser = true;
+      result.push(pseudoUserHistoryMessage(m));
+      continue;
+    }
+    // Providers expect the conversation to open with a user turn; keep the
+    // legacy pseudo-user form for assistant text that precedes any user message.
+    if (!seenUser) {
+      result.push(pseudoUserHistoryMessage(m));
+      continue;
+    }
+    const previous = result.at(-1) as (AgentMessage & HistoryMetadata) | undefined;
+    if (previous?.role === "assistant" && previous.rakazoHistory) {
+      // Merge consecutive assistant turns so strict-alternation providers accept them.
+      const merged = previous as AssistantMessage & HistoryMetadata;
+      merged.content = [...merged.content, { type: "text" as const, text: m.content }];
+      merged.rakazoMessageIds = [...(merged.rakazoMessageIds ?? [merged.rakazoMessageId!]), m.id!];
+      continue;
+    }
+    result.push(assistantHistoryMessage(m, assistantModel));
+  }
+  return result;
+}
+
+interface HistoryMetadata {
+  rakazoHistory?: boolean;
+  rakazoMessageId?: string;
+  rakazoMessageIds?: string[];
+  rakazoCreatedAt?: string;
+}
+
+function pseudoUserHistoryMessage(m: AgentRunRequest["history"][number]): AgentMessage {
+  const text = m.role === "assistant" ? `Assistant: ${m.content}` : m.content;
+  const images = m.role === "assistant" ? [] : toPiImages(m.images);
+  return {
+    role: "user" as const,
+    content: images.length ? [{ type: "text" as const, text }, ...images] : text,
+    timestamp: Date.now(),
+    rakazoHistory: true,
+    rakazoMessageId: m.id,
+    rakazoCreatedAt: m.createdAt,
+  } as AgentMessage;
+}
+
+/** A prior assistant turn replayed as a text-only assistant message (images are not replayed). */
+export function assistantHistoryMessage(
+  m: Pick<AgentRunRequest["history"][number], "id" | "createdAt" | "content">,
+  model: Pick<Model<Api>, "api" | "provider" | "id">,
+): AgentMessage {
+  return {
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text: m.content }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+    rakazoHistory: true,
+    rakazoMessageId: m.id,
+    rakazoCreatedAt: m.createdAt,
+  } as AgentMessage;
+}
+
+/** This run's assistant/tool-result messages with exposed tool aliases mapped back to original names. */
+export function transcriptMessages(
+  messages: readonly AgentMessage[],
+  tools: readonly AgentTool[],
+): unknown[] {
+  const originalNames = new Map(tools.map((tool) => [tool.name, tool.label ?? tool.name]));
+  const original = (name: string) => originalNames.get(name) ?? name;
+  const result: unknown[] = [];
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      result.push({
+        ...message,
+        content: message.content.map((part) =>
+          part.type === "toolCall" ? { ...part, name: original(part.name) } : part,
+        ),
+      });
+    } else if (message.role === "toolResult") {
+      result.push({ ...message, toolName: original(message.toolName) });
+    }
+  }
+  return result;
 }
 
 function withoutSteeringMessages(
@@ -2177,6 +2332,8 @@ interface ToolHost {
   nestedAgents: Set<Agent>;
   subagentGate: { acquire(): Promise<void>; release(): void };
   toolCallBudget: ToolCallBudget;
+  /** Step / wall-clock observer (observe/enforce); nested hosts share the parent's. */
+  turnObserver?: TurnLimitObserver;
   /** Shared fallback uniqueness when the model omits toolCallId (nested hosts reuse this). */
   toolCallSeq: { value: number };
   abortTurn(): void;
@@ -2192,17 +2349,17 @@ function toolCallBudgetExceededMessage(limit: number) {
   return `I stopped after reaching the limit of ${limit} tool calls in this turn. Send another message to continue.`;
 }
 
-function toolCallBudgetFor(runId: string): ToolCallBudget {
+function toolCallBudgetFor(runId: string, limit = maxToolCallsPerTurn()): ToolCallBudget {
   const existing = toolCallBudgetsByRun.get(runId);
   if (existing) {
     existing.inFlight = 0;
-    existing.limit = maxToolCallsPerTurn();
+    existing.limit = limit;
     return existing;
   }
   const budget: ToolCallBudget = {
     count: 0,
     exceeded: false,
-    limit: maxToolCallsPerTurn(),
+    limit,
     inFlight: 0,
   };
   if (budget.limit > 0) toolCallBudgetsByRun.set(runId, budget);
@@ -2222,7 +2379,10 @@ function maybeAbortToolCallBudget(host: ToolHost) {
 function beginToolCall(host: ToolHost): boolean {
   const budget = host.toolCallBudget;
   if (budget.limit <= 0) {
+    // A wall-clock stop marks an unlimited budget exceeded; refuse new work.
+    if (budget.exceeded) return false;
     budget.count += 1;
+    host.turnObserver?.onStep(budget.count);
     return true;
   }
   if (budget.exceeded) {
@@ -2230,6 +2390,7 @@ function beginToolCall(host: ToolHost): boolean {
     return false;
   }
   budget.count += 1;
+  host.turnObserver?.onStep(budget.count);
   if (budget.count <= budget.limit) {
     budget.inFlight += 1;
     return true;

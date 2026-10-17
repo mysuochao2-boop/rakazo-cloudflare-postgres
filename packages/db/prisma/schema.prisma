@@ -644,6 +644,7 @@ model Run {
   usageRecords         UsageRecord[]
   steeringMessages     SteeringMessage[]
   externalMessage      ExternalMessage?
+  transcript           RunTranscript?
 
   @@unique([spaceId, clientNonce])
   @@index([status, leaseExpiresAt])
@@ -698,6 +699,29 @@ model Attempt {
 
 // Deliberately independent of chat/user cascades: the worker must still be able
 // to cancel remote work after its originating chat or account is deleted.
+/// Sanitized structured runtime messages for one run (assistant text/thinking/toolCall
+/// plus toolResult). Images are never stored and secrets are redacted before write.
+/// Written only when RAKAZO_TRANSCRIPT_WRITE is on; read for structured history replay.
+model RunTranscript {
+  id            String   @id @default(cuid())
+  runId         String   @unique
+  run           Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  threadId      String
+  botId         String
+  formatVersion Int      @default(1)
+  provider      String
+  modelId       String
+  api           String?
+  messages      Json
+  truncated     Boolean  @default(false)
+  bytes         Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([threadId, createdAt])
+  @@map("run_transcripts")
+}
+
 model CloudAgent {
   id                  String   @id @default(uuid())
   operationKey        String   @unique

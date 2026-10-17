@@ -492,6 +492,24 @@ export interface AgentRunRequest {
   onToolCompleted?: (completion: AgentToolCompletion) => Promise<void> | void;
   /** Atomically claim durable user steering at the runtime's next safe turn boundary. */
   claimSteering?: (seenIds: string[]) => Promise<AgentSteeringMessage[]>;
+  /** Execution lane; background runs get background step/wall limits. Default interactive. */
+  lane?: "interactive" | "background";
+  /** Per-run step / wall-clock overrides (e.g. a background task's own cap). */
+  turnLimitOverrides?: { maxSteps?: number | null; maxWallMs?: number | null };
+  /**
+   * Receives this run's new runtime messages (assistant + tool results, no history,
+   * no system prompt) once the run settles. Implementations must sanitize before storing.
+   */
+  onTranscript?: (transcript: AgentRunTranscript) => Promise<void> | void;
+}
+
+/** Provider-shaped runtime messages produced by one run, plus the model that produced them. */
+export interface AgentRunTranscript {
+  provider: string;
+  modelId: string;
+  api?: string;
+  /** Raw runtime messages. Tool names are the original (connector) names, not exposed aliases. */
+  messages: unknown[];
 }
 
 export interface ScriptedTurn {
