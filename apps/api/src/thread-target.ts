@@ -704,6 +704,9 @@ export async function sendThreadMessage(
           where: {
             threadId: target.threadId,
             botId: target.botId,
+            // User messages only ever steer or queue behind the interactive lane; a
+            // background-lane run never absorbs (or holds) the conversation.
+            lane: "interactive",
             status: { in: [...ACTIVE_RUN_STATUSES] },
           },
           select: { id: true, taskId: true, status: true, trigger: true },
@@ -873,6 +876,9 @@ export async function sendThreadMessage(
         where: {
           threadId: target.threadId,
           botId: { in: targetBotIds },
+          // User messages only ever steer or queue behind the interactive lane; a
+          // background-lane run never absorbs (or holds) the conversation.
+          lane: "interactive",
           status: { in: [...ACTIVE_RUN_STATUSES] },
         },
         select: { id: true, taskId: true, botId: true, status: true, trigger: true },
