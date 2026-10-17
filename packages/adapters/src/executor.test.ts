@@ -10,10 +10,10 @@ import {
   dockerComputerToolInstruction,
   isTerminalModelSetupError,
   loadCurrentTurnImages,
+  MACHINE_HARDWARE_DESKTOP_GUARD_REWRITE,
+  MACHINE_HARDWARE_SHELL_ONLY_GUIDANCE,
   missingTurnImagesInstruction,
   parseUpdateBotPatch,
-  MACHINE_HARDWARE_SHELL_ONLY_GUIDANCE,
-  MACHINE_HARDWARE_DESKTOP_GUARD_REWRITE,
   persistentComputerInstruction,
   runNotificationsEnabled,
   selectBuiltinToolsForRun,
@@ -296,6 +296,25 @@ describe("run workspace checkpoint", () => {
     await expect(checkpoint.flush()).rejects.toThrow("checkpoint failed");
     await expect(checkpoint.flush()).resolves.toBe(true);
     expect(persist).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds a hung workspace export so finalize is never starved (zombie run regression)", async () => {
+    let signal: AbortSignal | undefined;
+    // A whole-home export of a large toolchain never finishes within a run.
+    const persist = vi.fn((s: AbortSignal) => {
+      signal = s;
+      return new Promise<never>(() => undefined);
+    });
+    const onTimeout = vi.fn();
+    const checkpoint = createRunWorkspaceCheckpoint(persist, { timeoutMs: 20, onTimeout });
+    checkpoint.markDirty();
+
+    await expect(checkpoint.flush()).resolves.toBe(false);
+    expect(signal?.aborted).toBe(true);
+    expect(onTimeout).toHaveBeenCalledWith(20);
+    // Deferred to the idle checkpoint: the failure path does not retry the same export.
+    await expect(checkpoint.flush()).resolves.toBe(false);
+    expect(persist).toHaveBeenCalledOnce();
   });
 });
 
