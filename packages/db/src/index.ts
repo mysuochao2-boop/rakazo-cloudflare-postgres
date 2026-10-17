@@ -1,6 +1,7 @@
 export * from "./artifact-versions.js";
 export * from "./billing.js";
 export * from "./bootstrap-user.js";
+export * from "./bot-runtime-logs.js";
 export * from "./cancel-runs.js";
 export * from "./client.js";
 export * from "./computers.js";

@@ -436,6 +436,7 @@ model Bot {
   botSecrets BotSecret[]
 
   externalConversations ExternalConversation[]
+  runtimeLogs       BotRuntimeLog[]
 
   @@unique([spaceId, spawnKey])
   @@index([spaceId, userId, archivedAt, pinned, updatedAt])
@@ -724,6 +725,31 @@ model RunTranscript {
 
   @@index([threadId, createdAt])
   @@map("run_transcripts")
+}
+
+/// Redacted per-bot runtime milestones for the live logs view (RAKAZO_BOT_LIVE_LOGS).
+/// Metadata only: step codes, tool names, durations, outcomes. Never prompts, tool
+/// arguments, tool output, or images. Rows older than the retention window are pruned.
+model BotRuntimeLog {
+  seq       BigInt   @id @default(autoincrement())
+  spaceId   String
+  botId     String
+  bot       Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  runId     String?
+  threadId  String?
+  lane      String?
+  /// info | warn | error
+  level     String
+  code      String
+  tool      String?
+  ok        Boolean?
+  ms        Int?
+  summary   String?
+  createdAt DateTime @default(now())
+
+  @@index([botId, seq])
+  @@index([createdAt])
+  @@map("bot_runtime_logs")
 }
 
 /// A long-running headless task executed as its own Run on the bot's background lane.

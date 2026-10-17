@@ -1,3 +1,5 @@
+import { emitRuntimeLog, runtimeLogFromTiming } from "@rakazo/core";
+
 /**
  * Structured per-step latency markers. One JSON object per line on stdout so
  * Cloudflare Container logs / Workers Observability can filter on
@@ -14,4 +16,6 @@ export function logRunTiming(
   } catch {
     // Timing must never affect a run.
   }
+  // No-op unless RAKAZO_BOT_LIVE_LOGS installed a tap in this process.
+  emitRuntimeLog(runtimeLogFromTiming(step, fields));
 }

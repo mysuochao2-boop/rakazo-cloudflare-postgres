@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BackgroundJobHandlers } from "@rakazo/adapter-kit";
+import { emitRuntimeLog } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import type { Logger } from "@rakazo/logging";
 import { backgroundLaneCapacity, RuntimeLaneSlots } from "./runtime-lanes.js";
@@ -87,6 +88,15 @@ export async function startBotRuntimeServer(options: {
       // Acquire synchronously after the lookup so two deliveries cannot both pass.
       const acquired = slots.tryAcquire(runId, run.lane);
       if (!acquired.ok) {
+        if (!acquired.duplicate) {
+          emitRuntimeLog({
+            code: "runtime.lane_busy",
+            level: "warn",
+            runId,
+            lane: acquired.lane,
+            summary: `active=${acquired.activeRunIds.length}`,
+          });
+        }
         json(response, acquired.duplicate ? 202 : 409, {
           accepted: acquired.duplicate,
           lane: acquired.lane,
@@ -96,8 +106,17 @@ export async function startBotRuntimeServer(options: {
         return;
       }
 
+      emitRuntimeLog({ code: "runtime.accepted", runId, lane: slots.laneOf(run.lane) });
       const task = options.handlers["run.continue"]({ runId })
-        .catch((error) => options.logger.error("bot runtime execution failed", error, { runId }))
+        .catch((error) => {
+          options.logger.error("bot runtime execution failed", error, { runId });
+          emitRuntimeLog({
+            code: "run.error",
+            level: "error",
+            runId,
+            summary: error instanceof Error ? error.message : String(error),
+          });
+        })
         .finally(async () => {
           slots.release(runId);
           if (options.callbackUrl) {

@@ -2,6 +2,7 @@ export * from "./ai-consent.js";
 export * from "./attachments.js";
 export * from "./auth.js";
 export * from "./bot-avatar.js";
+export * from "./bot-runtime-logs.js";
 export * from "./bot-secrets.js";
 export * from "./builtin-tools.js";
 export * from "./cloudflare-ai-gateway.js";

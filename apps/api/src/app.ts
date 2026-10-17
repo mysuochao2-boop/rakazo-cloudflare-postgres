@@ -73,9 +73,15 @@ import {
 import { cloudflareFileStoresFromEnv, realtimeFanoutFromEnv } from "@rakazo/adapters-cloudflare";
 import { createAuth, isBlockedAuthPath, loopbackTwinOrigins } from "@rakazo/auth";
 import type { Actor, AuthCapabilities } from "@rakazo/contracts";
-import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
+import {
+  botLiveLogsEnabled,
+  setRuntimeLogTap,
+  signupAllowlistBootUpdate,
+  signupPolicyFromEnv,
+} from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import {
+  createBotRuntimeLogWriter,
   createDb,
   createPool,
   createThreadEvents,
@@ -211,6 +217,9 @@ export async function createApp(
   const events = createThreadEvents(prisma, realtime, {
     runSecretWriter: createRunSecretWriter(secrets),
   });
+  // RAKAZO_BOT_LIVE_LOGS: mirror redacted send/run milestones from this process.
+  const liveLogs = botLiveLogsEnabled() ? createBotRuntimeLogWriter(prisma, realtime) : undefined;
+  if (liveLogs) setRuntimeLogTap(liveLogs.tap);
   const environmentSignupPolicy = signupPolicyFromEnv(env);
   const deploymentSettings = await prisma.deploymentSettings.upsert({
     where: { id: "default" },
@@ -525,6 +534,7 @@ export async function createApp(
     codexCatalog,
     prisma,
     events,
+    realtime,
     auth,
     jobs,
     sandbox,
@@ -987,6 +997,10 @@ export async function createApp(
       await reconciler?.stop();
       await jobs.close();
       await secrets.close();
+      if (liveLogs) {
+        setRuntimeLogTap(undefined);
+        await liveLogs.close();
+      }
       await realtime.close();
       await connector.stop();
       await mcp.close();

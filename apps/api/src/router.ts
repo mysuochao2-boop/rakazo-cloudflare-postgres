@@ -7,6 +7,7 @@ import type {
   ConnectorCatalogItem,
   JobPublisher,
   MemoryStore,
+  RealtimeFanout,
   SandboxProvider,
   SecretStore,
   UsageOperationKind,
@@ -145,6 +146,7 @@ import {
 import {
   ACTIVE_RUN_STATUSES,
   AttachmentValidationError,
+  botLiveLogsEnabled,
   CALL_CLIENT_NONCE_PREFIX,
   callClientNonce,
   clampCatalogThinkingLevel,
@@ -216,6 +218,7 @@ import {
   listSpaceArtifacts,
 } from "./artifacts.js";
 import type { BillingService } from "./billing.js";
+import { botRuntimeLogsPage, streamBotRuntimeLogs } from "./bot-runtime-logs.js";
 import { botProfileLabelsChanged, commitBotUpdate } from "./bot-update.js";
 import {
   executionBlocksUserTakeover,
@@ -532,6 +535,8 @@ export interface RouterDeps {
   cloudAgent?: CloudAgentConnection | null;
   prisma: PrismaClient;
   events: ThreadEvents;
+  /** Push wake-ups for bot live logs; without it the log stream polls. */
+  realtime?: RealtimeFanout;
   auth: Auth;
   jobs: JobPublisher;
   sandbox: SandboxProvider;
@@ -1898,6 +1903,26 @@ export function createRouter(deps: RouterDeps) {
           webhookConfigured: true as const,
         };
       }),
+      logs: {
+        enabled: authed.bots.logs.enabled.handler(async () => ({
+          enabled: botLiveLogsEnabled(),
+        })),
+        list: authed.bots.logs.list.handler(async ({ context, input }) =>
+          botRuntimeLogsPage(deps.prisma, context.actor, input),
+        ),
+        subscribe: authed.bots.logs.subscribe.handler(async function* ({ context, input }) {
+          yield* streamBotRuntimeLogs({
+            prisma: deps.prisma,
+            realtime: deps.realtime,
+            actor: context.actor,
+            input,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            heartbeatMs: HEARTBEAT_MS,
+            recheckMs: SESSION_RECHECK_MS,
+          });
+        }),
+      },
     },
     groups: {
       create: authed.groups.create.handler(async ({ context, input }) => {

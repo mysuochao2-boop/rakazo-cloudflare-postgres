@@ -21,6 +21,7 @@ import {
   FolderPlus,
   Pencil,
   Pin,
+  ScrollText,
   Trash2,
 } from "lucide-react";
 
@@ -40,6 +41,7 @@ export function BotContextMenu({
   onToggleUnread,
   onEdit,
   onDuplicate,
+  onRuntimeLogs,
   onClear,
   onArchive,
   onDelete,
@@ -55,6 +57,8 @@ export function BotContextMenu({
   onToggleUnread: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
+  /** Present only when live runtime logs are on for this deployment. */
+  onRuntimeLogs?: () => void;
   onClear: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -134,6 +138,12 @@ export function BotContextMenu({
           <Copy />
           {t`Duplicate`}
         </DropdownMenuItem>
+        {onRuntimeLogs ? (
+          <DropdownMenuItem onClick={onRuntimeLogs}>
+            <ScrollText />
+            {t`Runtime logs`}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onClear}>
           <Eraser />

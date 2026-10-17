@@ -7,6 +7,12 @@ import {
   ATTACHMENT_MAX_BASE64_LENGTH,
   ATTACHMENT_MAX_COUNT,
 } from "./attachments.js";
+import {
+  BotRuntimeLogStreamItemSchema,
+  BotRuntimeLogsListInput,
+  BotRuntimeLogsPageSchema,
+  BotRuntimeLogsSubscribeInput,
+} from "./bot-runtime-logs.js";
 import { BotSecretMetadata, BotSecretPutInput, StoredBotSecretName } from "./bot-secrets.js";
 import {
   ActionApprovalRuleSchema,
@@ -296,6 +302,14 @@ export const appContract = {
         webhookConfigured: z.literal(true),
       }),
     ),
+    /** Live runtime logs (RAKAZO_BOT_LIVE_LOGS). Only the bot's owner may read them. */
+    logs: {
+      enabled: oc.output(z.object({ enabled: z.boolean() })),
+      list: oc.input(BotRuntimeLogsListInput).output(BotRuntimeLogsPageSchema),
+      subscribe: oc
+        .input(BotRuntimeLogsSubscribeInput)
+        .output(eventIterator(BotRuntimeLogStreamItemSchema)),
+    },
   },
   groups: {
     create: oc.input(CreateGroupInput).output(GroupSchema),

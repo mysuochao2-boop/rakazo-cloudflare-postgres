@@ -31,7 +31,12 @@ import type {
 } from "@rakazo/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
 import { usableModelId } from "@rakazo/contracts";
-import { historyAssistantRoleEnabled, toolTelemetryEnabled } from "@rakazo/core";
+import {
+  emitRuntimeLog,
+  historyAssistantRoleEnabled,
+  summarizeAgentLogFields,
+  toolTelemetryEnabled,
+} from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
@@ -281,7 +286,10 @@ export class PiAgentRuntime implements AgentRuntime {
           turnLimits,
           request.runId,
           request.lane ?? "interactive",
-          (event) => getLogger().warn("agent.turn_limit", { ...event }),
+          (event) => {
+            getLogger().warn("agent.turn_limit", { ...event });
+            emitAgentRuntimeLog("agent.turn_limit", "warn", { ...event });
+          },
         );
         const batchStats = toolTelemetryEnabled() ? new ToolBatchStats() : undefined;
         const initialModelTarget: RuntimeModelTarget = {
@@ -330,8 +338,13 @@ export class PiAgentRuntime implements AgentRuntime {
             ? {
                 transcripts: request.historyTranscripts ?? [],
                 toolNames: new Map(tools.map((tool) => [tool.label ?? tool.name, tool.name])),
-                onStats: (stats) =>
-                  getLogger().info("agent.structured_history", { runId: request.runId, ...stats }),
+                onStats: (stats) => {
+                  getLogger().info("agent.structured_history", { runId: request.runId, ...stats });
+                  emitAgentRuntimeLog("agent.structured_history", "info", {
+                    runId: request.runId,
+                    ...stats,
+                  });
+                },
               }
             : undefined,
         );
@@ -755,13 +768,15 @@ export class PiAgentRuntime implements AgentRuntime {
           }
         }
         if (batchStats) {
-          getLogger().info("agent.tool_stats", {
+          const toolStats = {
             runId: request.runId,
             lane: request.lane ?? "interactive",
             steps: host.toolCallBudget.count,
             wallMs: Date.now() - turnObserver.startedAt,
             ...batchStats.summary(),
-          });
+          };
+          getLogger().info("agent.tool_stats", toolStats);
+          emitAgentRuntimeLog("agent.tool_stats", "info", toolStats);
         }
         await flushTranscript();
         queue.push(streamed.trim() ? { type: "done", text: streamed } : { type: "done" });
@@ -2307,6 +2322,22 @@ export function providerFailureText(message: unknown): string | undefined {
   return undefined;
 }
 
+/** Mirrors an `agent.*` log into live runtime logs (metadata only; no-op when the flag is off). */
+function emitAgentRuntimeLog(
+  code: string,
+  level: "info" | "warn",
+  fields: { runId?: string; lane?: string; [key: string]: unknown },
+): void {
+  emitRuntimeLog({
+    code,
+    level,
+    runId: fields.runId ?? null,
+    lane: typeof fields.lane === "string" ? fields.lane : null,
+    ms: typeof fields.wallMs === "number" ? fields.wallMs : null,
+    summary: summarizeAgentLogFields(fields),
+  });
+}
+
 function sanitizeSensitiveText(message: string) {
   return message
     .replace(/sk-or-v1-[a-zA-Z0-9]+/g, "[redacted]")
@@ -2621,6 +2652,8 @@ export function structuredHistoryFallbackStream(
             runId: state.runId,
             error: sanitizeSensitiveText(String(event.error.errorMessage ?? "")).slice(0, 300),
           });
+          // The provider error text stays in container logs; live logs get the code only.
+          emitAgentRuntimeLog("agent.structured_history_fallback", "warn", { runId: state.runId });
           await pipe(invoke(flatContext()), false);
           return;
         }
