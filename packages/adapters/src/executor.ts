@@ -68,6 +68,7 @@ import {
   expandSkillReferencesInPrompt,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
+  historyFormatFor,
   humanizeToolName,
   inferAttachmentMimeType,
   isCallClientNonce,
@@ -320,7 +321,7 @@ import {
   tryCompleteConnectionWithCode,
 } from "./run-secret.js";
 import { logRunTiming } from "./run-timing.js";
-import { recordRunTranscript } from "./run-transcript-store.js";
+import { loadHistoryTranscripts, recordRunTranscript } from "./run-transcript-store.js";
 import { withRuntimeCleanup } from "./runtime-stream.js";
 import {
   cancelScheduleFromTool,
@@ -6392,7 +6393,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
               maxImages: modelImageBudget,
             })
           : history;
-        const runtimeHistory = [...historicalContext, ...historyWithImages];
+        const historyFormat = scripted ? "flat" : historyFormatFor(run.spaceId);
+        const runIdByMessageId = new Map(
+          historyMessages
+            .filter((message) => message.role === "assistant" && message.runId)
+            .map((message) => [message.id, message.runId!]),
+        );
+        const runtimeHistory: AgentRunRequest["history"] = [
+          ...historicalContext,
+          ...(historyFormat === "structured"
+            ? historyWithImages.map((entry) => {
+                const entryRunId = entry.id ? runIdByMessageId.get(entry.id) : undefined;
+                return entryRunId ? { ...entry, runId: entryRunId } : entry;
+              })
+            : historyWithImages),
+        ];
+        const historyTranscripts =
+          historyFormat === "structured"
+            ? await loadHistoryTranscripts(deps.prisma, {
+                threadId: thread.id,
+                runIds: runtimeHistory.flatMap((entry) => (entry.runId ? [entry.runId] : [])),
+              })
+            : [];
         // Without a roster a bot only knows the bots it spawned itself.
         const botDirectory = thread.groupId
           ? undefined
@@ -6532,6 +6554,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .filter((instruction): instruction is string => Boolean(instruction))
                 .join("\n\n"),
               history: runtimeHistory,
+              historyFormat,
+              historyTranscripts,
               currentTurnImages,
               tools,
               model: {

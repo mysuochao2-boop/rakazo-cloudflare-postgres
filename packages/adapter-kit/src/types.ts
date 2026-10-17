@@ -460,7 +460,13 @@ export interface AgentRunRequest {
     content: string;
     /** Images attached to this message, hydrated only for recent user turns. */
     images?: AgentInputImage[];
+    /** Run that produced this assistant message; keys structured transcript replay. */
+    runId?: string;
   }>;
+  /** "structured" replays historyTranscripts as real tool calls/results. Default flat. */
+  historyFormat?: "flat" | "structured";
+  /** Sanitized RunTranscript rows for runs referenced by history[].runId. */
+  historyTranscripts?: AgentHistoryTranscript[];
   currentTurnImages?: AgentInputImage[];
   tools: ConnectorTool[];
   model: AgentRunModel;
@@ -501,6 +507,14 @@ export interface AgentRunRequest {
    * no system prompt) once the run settles. Implementations must sanitize before storing.
    */
   onTranscript?: (transcript: AgentRunTranscript) => Promise<void> | void;
+}
+
+export interface AgentHistoryTranscript {
+  runId: string;
+  provider: string;
+  modelId: string;
+  api?: string | null;
+  messages: unknown[];
 }
 
 /** Provider-shaped runtime messages produced by one run, plus the model that produced them. */
