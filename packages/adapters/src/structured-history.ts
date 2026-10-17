@@ -230,7 +230,7 @@ export function emptyStats(): StructuredHistoryStats {
 
 function lastText(messages: readonly Json[]): string {
   const last = messages.at(-1);
-  if (!last || last.role !== "assistant") return "";
+  if (last?.role !== "assistant") return "";
   return (last.content as Json[])
     .filter((part) => part.type === "text")
     .map((part) => String(part.text ?? ""))
