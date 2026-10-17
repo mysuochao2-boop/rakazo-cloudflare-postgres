@@ -68,6 +68,11 @@ async function runtimeRequest(
     "x-rakazo-bot-id": command.botId,
   });
   if (new URL(request.url).pathname === "/__runtime/finished") {
+    // Multi-lane runtimes report how many runs are still active (other lanes / heartbeat).
+    const activeRuns = (body.value as { activeRuns?: unknown }).activeRuns;
+    if (typeof activeRuns === "number" && Number.isFinite(activeRuns) && activeRuns > 0) {
+      headers.set("x-rakazo-active-runs", String(Math.min(Math.floor(activeRuns), 16)));
+    }
     return runtime.fetch("https://runtime.internal/finished", { method: "POST", headers });
   }
   ctx?.waitUntil(

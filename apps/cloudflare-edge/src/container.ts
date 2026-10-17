@@ -98,6 +98,23 @@ interface PendingRun {
   runId: string;
   acceptedAt: number;
   attempts: number;
+  /** Lane learned from a runtime 409 body; absent on old stored entries (unknown). */
+  lane?: string;
+}
+
+/**
+ * Picks the next pending run to offer the runtime, skipping runs whose lane already
+ * answered 409 in this pass. Unknown-lane runs are always offered (the runtime decides),
+ * so a full background lane never blocks an interactive run queued behind it.
+ */
+export function nextDeliverable(
+  queue: readonly PendingRun[],
+  tried: ReadonlySet<string>,
+  blockedLanes: ReadonlySet<string>,
+): PendingRun | undefined {
+  return queue.find(
+    (item) => !tried.has(item.runId) && !(item.lane && blockedLanes.has(item.lane)),
+  );
 }
 
 /**
@@ -156,20 +173,40 @@ export class BotRuntimeContainer extends DurableObject<CloudflareEnv> {
     let retryInMs: number | undefined;
     try {
       const container = await this.ensureRuntime(botId, queue[0]?.runId);
-      while (queue.length > 0) {
-        const next = queue[0]!;
+      const tried = new Set<string>();
+      const blockedLanes = new Set<string>();
+      for (;;) {
+        // Re-read so runs accepted during this pass are offered too.
+        queue = await this.pending();
+        const next = nextDeliverable(queue, tried, blockedLanes);
+        if (!next) break;
+        tried.add(next.runId);
         const response = await container
           .getTcpPort(BOT_RUNTIME_PORT)
           .fetch(`http://container/runs/${encodeURIComponent(next.runId)}/continue`, {
             method: "POST",
             headers: { authorization: `Bearer ${this.env.RUNTIME_DISPATCH_SECRET}` },
           });
-        await response.body?.cancel();
         if (response.status === 409) {
-          // Another run is active on this bot; /finished drains again, alarm is a backstop.
+          // That run's lane is busy; /finished drains again, alarm is a backstop. Keep
+          // offering other runs: a busy lane must not block the rest of the queue.
+          const lane = await response
+            .json<{ lane?: unknown }>()
+            .then((body) => (typeof body.lane === "string" ? body.lane : undefined))
+            .catch(() => undefined);
+          blockedLanes.add(lane ?? "interactive");
+          if (lane && next.lane !== lane) {
+            await this.ctx.storage.put(
+              PENDING_KEY,
+              (await this.pending()).map((item) =>
+                item.runId === next.runId ? { ...item, lane } : item,
+              ),
+            );
+          }
           retryInMs = 5_000;
-          break;
+          continue;
         }
+        await response.body?.cancel();
         if (!response.ok && response.status !== 404) {
           throw new Error(`runtime continue returned ${response.status}`);
         }
@@ -211,7 +248,11 @@ export class BotRuntimeContainer extends DurableObject<CloudflareEnv> {
     const url = new URL(request.url);
     if (url.pathname === "/finished") {
       if (this.ctx.container?.running) {
-        await this.ctx.container.setInactivityTimeout(BOT_RUNTIME_IDLE_TIMEOUT_MS);
+        // Another lane (or a heartbeat) still has work: keep the busy window.
+        const stillActive = Number(request.headers.get("x-rakazo-active-runs") ?? 0) > 0;
+        await this.ctx.container.setInactivityTimeout(
+          stillActive ? BOT_RUNTIME_BUSY_TIMEOUT_MS : BOT_RUNTIME_IDLE_TIMEOUT_MS,
+        );
       }
       if ((await this.pending()).length > 0) this.ctx.waitUntil(this.drain());
       return new Response(null, { status: 204 });

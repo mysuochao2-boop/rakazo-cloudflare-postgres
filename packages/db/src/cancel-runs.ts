@@ -26,3 +26,22 @@ export async function cancelRunsInTransaction(
     data: { status: "cancelled" },
   });
 }
+
+export const ACTIVE_BACKGROUND_TASK_STATUSES = ["queued", "running", "waiting_input"] as const;
+
+/** Marks a thread's active background tasks cancelled (thread stop / clear). No wake run. */
+export async function cancelBackgroundTasksForThreadInTransaction(
+  tx: Pick<Prisma.TransactionClient, "backgroundTask">,
+  threadId: string,
+  cancelledAt: Date,
+): Promise<void> {
+  await tx.backgroundTask.updateMany({
+    where: { threadId, status: { in: [...ACTIVE_BACKGROUND_TASK_STATUSES] } },
+    data: {
+      status: "cancelled",
+      cancelRequested: true,
+      completedAt: cancelledAt,
+      error: "Stopped by the user.",
+    },
+  });
+}

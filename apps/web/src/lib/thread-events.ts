@@ -36,6 +36,8 @@ const runTriggers = new Set<Run["trigger"]>([
   "messaging",
   "cloud_agent",
   "created",
+  "background_task",
+  "background_wake",
 ]);
 
 function runFromStartedEvent(event: ProductEvent, previous: Run | undefined): Run {

@@ -26,6 +26,7 @@ import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   answerWaitingRunWithTextInTransaction,
   appendEventInTransaction,
+  cancelBackgroundTasksForThreadInTransaction,
   createGroupRepos,
   createRepos,
   createThreadMessageInTransaction,
@@ -1084,6 +1085,8 @@ export async function stopThreadRuns(
       select: { id: true, botId: true },
     });
     const ids = cancelled.map((run) => run.id);
+    // Stop also stops the thread's background tasks (their runs were cancelled above).
+    await cancelBackgroundTasksForThreadInTransaction(tx, target.threadId, new Date());
     await tx.steeringMessage.deleteMany({
       where: {
         botId: { in: target.kind === "bot" ? [target.botId] : target.memberBotIds },

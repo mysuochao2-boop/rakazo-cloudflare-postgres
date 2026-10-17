@@ -57,6 +57,7 @@ import {
   appendToolCallSegment,
   applyJudgeDecision,
   assertTransition,
+  backgroundTasksEnabled,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
   CALL_CLIENT_NONCE_PREFIX,
@@ -83,6 +84,7 @@ import {
   parallelToolGuidanceEnabled,
   planActionGate,
   promptInvokesSkill,
+  type RunLane,
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
@@ -172,6 +174,20 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
+import {
+  appendBackgroundTaskInstruction,
+  BACKGROUND_TASK_TOOL_NAMES as BACKGROUND_TASK_TOOL_DISPATCH,
+  BackgroundTaskError,
+  backgroundTaskStatus,
+  claimBackgroundTaskInbox,
+  completeBackgroundTask,
+  markBackgroundTaskRunning,
+  markBackgroundTaskWaiting,
+  selectBackgroundTaskTools,
+  startBackgroundTask,
+  stopBackgroundTask,
+  updateBackgroundTaskProgress,
+} from "./background-tasks.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bot-messages.js";
 import {
@@ -401,6 +417,7 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "browser_snapshot",
   "list_secrets",
   "cloud_agent_status",
+  "background_task_status",
 ]);
 /** Added to the turn prompt when the user spoke this message on a live voice call. */
 const VOICE_CALL_BASE_INSTRUCTION =
@@ -3279,6 +3296,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const run = await deps.prisma.run.findUnique({ where: { id: runId } });
       if (!run) return;
       if (isTerminal(run.status as RunStatus)) return;
+      // Background-lane runs (RAKAZO_BACKGROUND_TASKS) are headless: no computer execution
+      // lease, no screen, no chat output; their final text becomes the task result.
+      const runLane: RunLane = run.lane === "background" ? "background" : "interactive";
+      const backgroundTaskId = runLane === "background" ? run.backgroundTaskId : null;
+      const backgroundTask = backgroundTaskId
+        ? await deps.prisma.backgroundTask.findUnique({
+            where: { id: backgroundTaskId },
+            select: { id: true, stepCap: true, wallCapMs: true, status: true },
+          })
+        : null;
       let { resumeCheckpoint, heldForTakeover, resumeHeldLease, takeoverResume } =
         takeoverContinuePlan(run);
 
@@ -3340,12 +3367,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
       }
       let computerLease: ComputerExecutionLease | null = null;
       try {
-        computerLease = await acquireComputerExecutionLease(deps.prisma, {
-          computerId: leaseTarget.computerId,
-          runId,
-          botId: run.botId,
-          resumeHeldLease,
-        });
+        // Headless background runs share the bot's computer through shell/files only and
+        // must not take the per-bot execution lease (that would make the interactive lane
+        // ComputerBusy for the whole task).
+        if (runLane !== "background")
+          computerLease = await acquireComputerExecutionLease(deps.prisma, {
+            computerId: leaseTarget.computerId,
+            runId,
+            botId: run.botId,
+            resumeHeldLease,
+          });
       } catch (error) {
         if (!(error instanceof ComputerBusyError)) throw error;
         await requeueComputerRun(deps, runId, workerId, fence, resumeCheckpoint, heldForTakeover);
@@ -3680,6 +3711,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: message,
           });
           if (!failed) return;
+          if (backgroundTaskId) {
+            await completeBackgroundTask(deps.prisma, deps.jobs, {
+              taskId: backgroundTaskId,
+              runId,
+              outcome: "failed",
+              error: message,
+            }).catch((error) => getLogger().error("background task failure update failed", error));
+          }
           if (failed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(failed.continuationRunId))
@@ -3770,7 +3809,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ms: Date.now() - computerStartedAt,
           available: computerAvailable,
         });
-        if (computerAvailable) {
+        if (computerAvailable && runLane !== "background") {
           screenRelease = { computer, context };
           scheduleComputerSleep(deps.jobs, storedComputer.id);
         }
@@ -3804,6 +3843,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         const attachedFilesPrompt = currentTurnFilesInstruction(currentTurnFiles);
         const graphical =
+          runLane !== "background" &&
           computerAvailable &&
           computer.kind !== "desktop" &&
           deps.sandbox.describe().capabilities.graphical;
@@ -3876,6 +3916,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             messagingChannelRun,
             voiceCall,
             disabledBuiltinTools: [...disabledBuiltinTools],
+            backgroundTasks: { enabled: backgroundTasksEnabled(), lane: runLane },
           }),
           // Cross-owner agent connections only exist for chat-linked bots.
           ...(hasMessagingIdentity
@@ -3917,6 +3958,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
         const tools = run.trigger === "created" ? [] : [...builtins, ...exposedConnectorTools];
+        if (backgroundTaskId) await markBackgroundTaskRunning(deps.prisma, backgroundTaskId);
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
@@ -3947,6 +3989,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : "Computer files and desktop actions are unavailable in this deployment.";
 
         let assembled = "";
+        let backgroundSteps = 0;
         let currentTextSegment = "";
         let messageSegments: MessageBlock[] = [];
         // Terminal subagent rows are published as their own messages (not appended to
@@ -4076,6 +4119,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         const pauseForApproval = () => {
           approvalPausePending = true;
+          // The approval card is posted to the parent thread like any other run's.
+          if (backgroundTaskId) void markBackgroundTaskWaiting(deps.prisma, backgroundTaskId);
           return approvalPausedToolResult();
         };
 
@@ -5283,6 +5328,65 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }, finish);
           }
 
+          if (BACKGROUND_TASK_TOOL_DISPATCH.has(name)) {
+            if (runLane === "background" || !backgroundTasksEnabled()) {
+              return { error: "Background task tools are unavailable in this run." };
+            }
+            const scope = { spaceId: run.spaceId, botId: bot.id };
+            try {
+              if (name === "start_background_task") {
+                return finish(
+                  await startBackgroundTask(deps.prisma, deps.jobs, {
+                    operationKey: effectKey,
+                    spaceId: run.spaceId,
+                    botId: bot.id,
+                    threadId: thread.id,
+                    userId: run.userId,
+                    parentRunId: runId,
+                    title: String(args.title ?? ""),
+                    instructions: String(args.instructions ?? ""),
+                    notify: args.notify ? String(args.notify) : undefined,
+                    stepCap: typeof args.step_cap === "number" ? args.step_cap : undefined,
+                    modelPin: run.modelPinned
+                      ? {
+                          modelProvider: runModelProvider,
+                          modelId: runModelId,
+                          thinkingLevel: run.thinkingLevel ?? null,
+                        }
+                      : null,
+                  }),
+                );
+              }
+              if (name === "background_task_status") {
+                return await backgroundTaskStatus(
+                  deps.prisma,
+                  scope,
+                  args.task_id ? String(args.task_id) : undefined,
+                );
+              }
+              if (name === "stop_background_task") {
+                return finish(
+                  await stopBackgroundTask(
+                    deps.prisma,
+                    scope,
+                    String(args.task_id ?? ""),
+                    args.reason ? String(args.reason) : undefined,
+                  ),
+                );
+              }
+              return finish(
+                await appendBackgroundTaskInstruction(
+                  deps.prisma,
+                  scope,
+                  String(args.task_id ?? ""),
+                  String(args.text ?? ""),
+                ),
+              );
+            } catch (error) {
+              if (error instanceof BackgroundTaskError) return finish({ error: error.message });
+              throw error;
+            }
+          }
           if (name.startsWith("cloud_agent_")) {
             return finish(
               await executeCloudAgentTool(
@@ -6668,60 +6772,81 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         transcript,
                         secrets: runSecrets,
                       }),
+              lane: runLane,
+              ...(backgroundTask
+                ? {
+                    turnLimitOverrides: {
+                      maxSteps: backgroundTask.stepCap,
+                      maxWallMs: backgroundTask.wallCapMs,
+                    },
+                  }
+                : {}),
               claimSteering: scripted
                 ? undefined
-                : async (seenIds) => {
-                    const steering = await deps.events.claimSteering({
-                      threadId: thread.id,
-                      botId: bot.id,
-                      runId,
-                      leaseOwner: workerId,
-                      leaseFence: fence,
-                      seenIds,
-                    });
-                    return Promise.all(
-                      steering.map(async (item) => {
-                        const { images, files, unavailableInstruction } =
-                          await settleSteeringAttachmentLoads(
-                            loadCurrentTurnImages(deps, item.blocks, context),
-                            deps.artifacts
-                              ? materializeCurrentTurnFiles(
-                                  {
-                                    prisma: deps.prisma,
-                                    artifacts: deps.artifacts,
-                                    sandbox: deps.sandbox,
-                                  },
-                                  item.blocks,
-                                  {
-                                    context,
-                                    computer,
-                                    computerMode,
-                                    markWorkspaceDirty: workspaceCheckpoint.markDirty,
-                                  },
-                                )
-                              : Promise.resolve([]),
-                            item.blocks,
-                            context.signal,
-                          );
-                        workspaceCheckpoint.markFiles(files);
-                        const filesInstruction = currentTurnFilesInstruction(files);
-                        return {
+                : backgroundTaskId
+                  ? // Background runs take no user steering; the parent bot's appended
+                    // instructions (message_background_task) arrive here instead.
+                    async () =>
+                      (await claimBackgroundTaskInbox(deps.prisma, backgroundTaskId)).map(
+                        (item) => ({
                           id: item.id,
-                          messageId: item.messageId,
+                          messageId: item.id,
                           historyText: item.text,
-                          text: [
-                            await loadReplyContext(deps.prisma, thread.id, item.messageId),
-                            item.text,
-                            filesInstruction,
-                            unavailableInstruction,
-                          ]
-                            .filter(Boolean)
-                            .join("\n\n"),
-                          images,
-                        };
-                      }),
-                    );
-                  },
+                          text: item.text,
+                        }),
+                      )
+                  : async (seenIds) => {
+                      const steering = await deps.events.claimSteering({
+                        threadId: thread.id,
+                        botId: bot.id,
+                        runId,
+                        leaseOwner: workerId,
+                        leaseFence: fence,
+                        seenIds,
+                      });
+                      return Promise.all(
+                        steering.map(async (item) => {
+                          const { images, files, unavailableInstruction } =
+                            await settleSteeringAttachmentLoads(
+                              loadCurrentTurnImages(deps, item.blocks, context),
+                              deps.artifacts
+                                ? materializeCurrentTurnFiles(
+                                    {
+                                      prisma: deps.prisma,
+                                      artifacts: deps.artifacts,
+                                      sandbox: deps.sandbox,
+                                    },
+                                    item.blocks,
+                                    {
+                                      context,
+                                      computer,
+                                      computerMode,
+                                      markWorkspaceDirty: workspaceCheckpoint.markDirty,
+                                    },
+                                  )
+                                : Promise.resolve([]),
+                              item.blocks,
+                              context.signal,
+                            );
+                          workspaceCheckpoint.markFiles(files);
+                          const filesInstruction = currentTurnFilesInstruction(files);
+                          return {
+                            id: item.id,
+                            messageId: item.messageId,
+                            historyText: item.text,
+                            text: [
+                              await loadReplyContext(deps.prisma, thread.id, item.messageId),
+                              item.text,
+                              filesInstruction,
+                              unavailableInstruction,
+                            ]
+                              .filter(Boolean)
+                              .join("\n\n"),
+                            images,
+                          };
+                        }),
+                      );
+                    },
             },
             context,
           );
@@ -6753,6 +6878,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
 
+            if (backgroundTaskId && event.type === "tool") {
+              backgroundSteps += 1;
+              if (backgroundSteps === 1 || backgroundSteps % 5 === 0) {
+                void updateBackgroundTaskProgress(
+                  deps.prisma,
+                  backgroundTaskId,
+                  `${backgroundSteps} step(s); last tool: ${event.name}`,
+                  backgroundSteps,
+                );
+              }
+            }
             if (!firstTokenLogged && (event.type === "text" || event.type === "tool")) {
               firstTokenLogged = true;
               logRunTiming("model.first_token", {
@@ -7165,10 +7301,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             leaseOwner: workerId,
             leaseFence: fence,
             outcome: "completed",
-            blocks,
-            markUnread: completionMarksUnread(run.trigger, text),
+            // A background task's report is stored on the task, never posted to the chat;
+            // the wake run tells the user.
+            blocks: backgroundTaskId ? [] : blocks,
+            markUnread: backgroundTaskId ? false : completionMarksUnread(run.trigger, text),
           });
           if (!completed) return;
+          if (backgroundTaskId) {
+            await completeBackgroundTask(deps.prisma, deps.jobs, {
+              taskId: backgroundTaskId,
+              runId,
+              outcome: "completed",
+              resultText: text,
+              stepsUsed: backgroundSteps,
+            }).catch((error) => getLogger().error("background task completion failed", error));
+          }
           if (completed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
@@ -7247,6 +7394,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: message,
           });
           if (!failed) return;
+          if (backgroundTaskId) {
+            await completeBackgroundTask(deps.prisma, deps.jobs, {
+              taskId: backgroundTaskId,
+              runId,
+              outcome: "failed",
+              error: message,
+              stepsUsed: backgroundSteps,
+            }).catch((error) => getLogger().error("background task failure update failed", error));
+          }
           if (failed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(failed.continuationRunId))
@@ -7504,8 +7660,20 @@ export function selectBuiltinToolsForRun(options: {
   voiceCall?: boolean;
   /** Built-in names this bot turned off. Unknown names are ignored. */
   disabledBuiltinTools?: readonly string[];
+  /** RAKAZO_BACKGROUND_TASKS and this run's lane (background runs are headless). */
+  backgroundTasks?: { enabled: boolean; lane: RunLane };
 }) {
   const disabled = disabledBuiltinToolSet(options.disabledBuiltinTools);
+  return selectBackgroundTaskTools(
+    selectBuiltinToolsForRunBase(options, disabled),
+    options.backgroundTasks ?? { enabled: false, lane: "interactive" },
+  );
+}
+
+function selectBuiltinToolsForRunBase(
+  options: Parameters<typeof selectBuiltinToolsForRun>[0],
+  disabled: Set<string>,
+) {
   return selectCloudAgentTools(
     selectMemoryTools(
       filterBuiltinToolsForRun(
@@ -7940,7 +8108,8 @@ export function runIdentityInstruction(
 }
 
 export function runSendsFinishNotification(trigger: string): boolean {
-  return trigger !== "created";
+  // Background task runs are silent; their wake run speaks (and notifies) instead.
+  return trigger !== "created" && trigger !== "background_task";
 }
 
 /** Open the model only while this worker still owns the running lease. */
@@ -7967,7 +8136,7 @@ export function runAllowsSilentEmpty(trigger: string): boolean {
 }
 
 export function runPromotesMidTurnNarration(trigger: string): boolean {
-  return trigger !== "routine";
+  return trigger !== "routine" && trigger !== "background_task";
 }
 
 export function runReplyGuidance(trigger: string): string {

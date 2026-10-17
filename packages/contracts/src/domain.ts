@@ -938,6 +938,8 @@ export const RunSchema = z.object({
     "messaging",
     "cloud_agent",
     "created",
+    "background_task",
+    "background_wake",
   ]),
   routineId: Id.nullable(),
   modelProvider: z.string().nullable(),

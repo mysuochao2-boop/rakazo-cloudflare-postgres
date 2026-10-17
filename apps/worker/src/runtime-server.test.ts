@@ -66,4 +66,62 @@ describe("bot runtime server", () => {
     expect(response.status).toBe(409);
     expect(run).not.toHaveBeenCalled();
   });
+
+  it("runs interactive and background lanes concurrently and 409s only a full lane", async () => {
+    const releases: Array<() => void> = [];
+    const run = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const lanes: Record<string, string> = {
+      "bg-1": "background",
+      "bg-2": "background",
+      "bg-3": "background",
+      "int-1": "interactive",
+      "int-2": "interactive",
+    };
+    server = await startBotRuntimeServer({
+      botId: "bot-1",
+      host: "127.0.0.1",
+      port: 0,
+      token: "runtime-secret",
+      backgroundLanes: 2,
+      prisma: {
+        run: {
+          findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
+            botId: "bot-1",
+            lane: lanes[where.id],
+          })),
+        },
+      } as unknown as PrismaClient,
+      handlers: handlers(run),
+      logger: { error: vi.fn() } as unknown as Logger,
+    });
+    const post = async (id: string) => {
+      const response = await fetch(`http://127.0.0.1:${server!.port}/runs/${id}/continue`, {
+        method: "POST",
+        headers: { authorization: "Bearer runtime-secret" },
+      });
+      return { status: response.status, body: (await response.json()) as { lane?: string } };
+    };
+    expect((await post("bg-1")).status).toBe(202);
+    expect((await post("bg-2")).status).toBe(202);
+    const full = await post("bg-3");
+    expect(full.status).toBe(409);
+    expect(full.body.lane).toBe("background");
+    expect((await post("int-1")).status).toBe(202);
+    const busy = await post("int-2");
+    expect(busy.status).toBe(409);
+    expect(busy.body.lane).toBe("interactive");
+    // Re-delivery of an active run is accepted, not rejected.
+    expect((await post("bg-1")).status).toBe(202);
+    const health = await fetch(`http://127.0.0.1:${server.port}/health`).then((r) => r.json());
+    expect(health).toMatchObject({
+      activeRunId: "int-1",
+      lanes: { interactive: ["int-1"], background: ["bg-1", "bg-2"] },
+    });
+    for (const release of releases) release();
+  });
 });
