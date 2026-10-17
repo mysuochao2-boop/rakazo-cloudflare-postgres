@@ -1,4 +1,4 @@
-import type { AgentRunTranscript } from "@rakazo/adapter-kit";
+import type { AgentHistoryTranscript, AgentRunTranscript } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { RUN_TRANSCRIPT_FORMAT_VERSION, sanitizeTranscript } from "./run-transcript.js";
@@ -43,5 +43,50 @@ export async function recordRunTranscript(
     });
   } catch (error) {
     getLogger().warn("Run transcript write failed", { runId: input.runId, error });
+  }
+}
+
+/** Most recent transcripts to replay; older runs keep flat text. */
+export const MAX_REPLAYED_TRANSCRIPTS = 30;
+
+/**
+ * Loads transcripts for the runs visible in the history window (newest last, bounded).
+ * Read failures fall back to flat history by returning [].
+ */
+export async function loadHistoryTranscripts(
+  prisma: Pick<PrismaClient, "runTranscript">,
+  input: { threadId: string; runIds: readonly string[] },
+): Promise<AgentHistoryTranscript[]> {
+  const runIds = [...new Set(input.runIds)].slice(-MAX_REPLAYED_TRANSCRIPTS);
+  if (runIds.length === 0) return [];
+  try {
+    const rows = await prisma.runTranscript.findMany({
+      where: { threadId: input.threadId, runId: { in: runIds } },
+      select: {
+        runId: true,
+        provider: true,
+        modelId: true,
+        api: true,
+        messages: true,
+        formatVersion: true,
+      },
+    });
+    return rows
+      .filter(
+        (row) => row.formatVersion === RUN_TRANSCRIPT_FORMAT_VERSION && Array.isArray(row.messages),
+      )
+      .map((row) => ({
+        runId: row.runId,
+        provider: row.provider,
+        modelId: row.modelId,
+        api: row.api,
+        messages: row.messages as unknown[],
+      }));
+  } catch (error) {
+    getLogger().warn("Run transcripts could not be loaded; using flat history", {
+      threadId: input.threadId,
+      error,
+    });
+    return [];
   }
 }

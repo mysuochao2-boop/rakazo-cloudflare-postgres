@@ -71,6 +71,11 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import {
+  buildStructuredHistory,
+  flattenStructuredHistory,
+  looksLikeHistoryShapeError,
+} from "./structured-history.js";
 import { textContentArg } from "./tool-text.js";
 import {
   effectiveToolCallLimit,
@@ -300,12 +305,32 @@ export class PiAgentRuntime implements AgentRuntime {
         const seenSteeringIds: string[] = [];
         const initialSteering = request.claimSteering ? await request.claimSteering([]) : [];
         seenSteeringIds.push(...initialSteering.map((item) => item.id));
+        const priorHistory = withoutSteeringMessages(request.history, initialSteering);
+        const structuredRequested =
+          request.historyFormat === "structured" && Boolean(request.historyTranscripts?.length);
         const history = toHistory(
-          withoutSteeringMessages(request.history, initialSteering),
+          priorHistory,
           request.prompt,
           request.sourceMessageId,
-          historyAssistantRoleEnabled() ? completionModel : undefined,
+          historyAssistantRoleEnabled() || structuredRequested ? completionModel : undefined,
+          structuredRequested
+            ? {
+                transcripts: request.historyTranscripts ?? [],
+                toolNames: new Map(tools.map((tool) => [tool.label ?? tool.name, tool.name])),
+                onStats: (stats) =>
+                  getLogger().info("agent.structured_history", { runId: request.runId, ...stats }),
+              }
+            : undefined,
         );
+        // Provider 400 on structured history: retry once with the legacy flat format
+        // and keep using it for the rest of this run.
+        const structuredFallback: StructuredFallbackState = {
+          active: structuredRequested,
+          flat: structuredRequested
+            ? toHistory(priorHistory, request.prompt, request.sourceMessageId)
+            : [],
+          runId: request.runId,
+        };
         const initialPrompt = initialSteering.length
           ? `${request.prompt}\n\nAdditional user context:\n${initialSteering
               .map((item) => item.text)
@@ -428,29 +453,31 @@ export class PiAgentRuntime implements AgentRuntime {
         agent = new Agent({
           sessionId: conversationSessionId(request.threadId, request.botId),
           steeringMode: "all",
-          streamFn: (m, ctx, options) =>
-            hasBackups
-              ? fallbackAwareModelStream(fallbackState, ctx, options)
-              : reliableModelStream(
-                  models,
-                  m,
-                  ctx,
-                  withCloudflareGatewayAuth(request.model, options),
-                  request.model.maxTokens,
-                  () => selectedModel.credentials?.accessToken ?? apiKey,
-                  (preparedOptions) =>
-                    observedPiStream(
-                      models,
-                      m,
-                      ctx,
-                      preparedOptions,
-                      (event) => queue.push(event),
-                      this.modelCallObserver,
-                      { operationKind: request.usageOperationKind ?? "answer" },
-                      usageHooks,
-                    ),
-                  request.model.cacheCapabilities?.retentionMode,
-                ),
+          streamFn: (m, streamCtx, options) =>
+            structuredHistoryFallbackStream(structuredFallback, streamCtx, (ctx) =>
+              hasBackups
+                ? fallbackAwareModelStream(fallbackState, ctx, options)
+                : reliableModelStream(
+                    models,
+                    m,
+                    ctx,
+                    withCloudflareGatewayAuth(request.model, options),
+                    request.model.maxTokens,
+                    () => selectedModel.credentials?.accessToken ?? apiKey,
+                    (preparedOptions) =>
+                      observedPiStream(
+                        models,
+                        m,
+                        ctx,
+                        preparedOptions,
+                        (event) => queue.push(event),
+                        this.modelCallObserver,
+                        { operationKind: request.usageOperationKind ?? "answer" },
+                        usageHooks,
+                      ),
+                    request.model.cacheCapabilities?.retentionMode,
+                  ),
+            ),
           getApiKey: hasBackups
             ? async () => activeStreamTarget.credentials?.accessToken ?? activeStreamTarget.apiKey
             : async () => apiKey,
@@ -1032,7 +1059,13 @@ export function toHistory(
   prompt: string,
   sourceMessageId?: string | null,
   /** When set, prior assistant turns replay as role "assistant" attributed to this model. */
-  assistantModel?: Model<Api>,
+  assistantModel?: Pick<Model<Api>, "api" | "provider" | "id">,
+  /** Structured replay of stored run transcripts (requires assistantModel). */
+  structured?: {
+    transcripts: NonNullable<AgentRunRequest["historyTranscripts"]>;
+    toolNames: ReadonlyMap<string, string>;
+    onStats?: (stats: ReturnType<typeof buildStructuredHistory>["stats"]) => void;
+  },
 ): AgentMessage[] {
   let duplicatePromptIndex = -1;
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -1051,6 +1084,17 @@ export function toHistory(
       : history.filter((_, index) => index !== duplicatePromptIndex);
   const conversational = prior.filter((m) => m.role === "user" || m.role === "assistant");
   if (!assistantModel) return conversational.map(pseudoUserHistoryMessage);
+  if (structured) {
+    const built = buildStructuredHistory(conversational, {
+      model: assistantModel,
+      transcripts: structured.transcripts,
+      toolNames: structured.toolNames,
+      userMessage: pseudoUserHistoryMessage,
+      assistantText: (entry) => assistantHistoryMessage(entry, assistantModel),
+    });
+    structured.onStats?.(built.stats);
+    return built.messages as AgentMessage[];
+  }
   const result: AgentMessage[] = [];
   let seenUser = false;
   for (const m of conversational) {
@@ -2516,6 +2560,101 @@ export function isRetryableProviderUnavailable(error: unknown): boolean {
   return /rate.?limit|too many requests|quota|overload|capacity|temporarily unavailable|service unavailable|retry[- ](?:after|delay)|server error|upstream error|gateway timeout|timed? out|timeout|connection reset|connection refused|network error|max retries exceeded/.test(
     text,
   );
+}
+
+interface StructuredFallbackState {
+  active: boolean;
+  flat: AgentMessage[];
+  runId: string;
+}
+
+/**
+ * Runs one model call with structured history. If the provider rejects it before any
+ * output with an error that looks like a history-shape problem (HTTP 400, tool pairing,
+ * thinking signature, unknown tool…), switches this run to the legacy flat history and
+ * retries the same call once. Later calls in the run stay flat.
+ */
+export function structuredHistoryFallbackStream(
+  state: StructuredFallbackState,
+  context: TranscriptContext,
+  invoke: (context: TranscriptContext) => AssistantMessageEventStream,
+): AssistantMessageEventStream {
+  const flatContext = (): TranscriptContext => ({
+    ...context,
+    messages: flattenStructuredHistory(
+      context.messages as unknown as AgentMessage[],
+      state.flat,
+    ) as unknown as TranscriptContext["messages"],
+  });
+  if (!state.active) {
+    if (state.flat.length === 0) return invoke(context);
+    return invoke(flatContext());
+  }
+  const output = new AssistantMessageEventStream();
+  const pipe = async (stream: AssistantMessageEventStream, allowRetry: boolean) => {
+    const buffered: AssistantMessageEvent[] = [];
+    let sawOutput = false;
+    for await (const event of stream) {
+      if (event.type === "error") {
+        if (
+          allowRetry &&
+          !sawOutput &&
+          event.reason === "error" &&
+          !assistantHasPartialOutput(event.error) &&
+          looksLikeHistoryShapeError(event.error.errorMessage)
+        ) {
+          state.active = false;
+          getLogger().warn("agent.structured_history_fallback", {
+            runId: state.runId,
+            error: sanitizeSensitiveText(String(event.error.errorMessage ?? "")).slice(0, 300),
+          });
+          await pipe(invoke(flatContext()), false);
+          return;
+        }
+        for (const pending of buffered) output.push(pending);
+        output.push(event);
+        output.end(event.error);
+        return;
+      }
+      if (event.type === "done") {
+        for (const pending of buffered) output.push(pending);
+        output.push(event);
+        output.end(event.message);
+        return;
+      }
+      if (sawOutput || eventHasPartialOutput(event)) {
+        sawOutput = true;
+        for (const pending of buffered.splice(0)) output.push(pending);
+        output.push(event);
+      } else {
+        buffered.push(event);
+      }
+    }
+  };
+  void pipe(invoke(context), true).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    const failure: AssistantMessage = {
+      role: "assistant",
+      content: [],
+      api: "unknown" as Api,
+      provider: "unknown",
+      model: "unknown",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "error",
+      errorMessage: message,
+      timestamp: Date.now(),
+    };
+    output.push({ type: "error", reason: "error", error: failure });
+    output.end(failure);
+  });
+  return output;
 }
 
 function assistantHasPartialOutput(message: AssistantMessage): boolean {
