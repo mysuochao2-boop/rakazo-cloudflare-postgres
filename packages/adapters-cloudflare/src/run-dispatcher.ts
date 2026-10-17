@@ -15,7 +15,7 @@ export class CloudflareRunDispatcher implements RunDispatcher {
         "content-type": "application/json",
       },
       body: JSON.stringify(input),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");

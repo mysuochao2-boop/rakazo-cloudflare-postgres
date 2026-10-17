@@ -243,6 +243,7 @@ import {
   startOnboarding,
 } from "./onboarding.js";
 import { listRoutineRuns } from "./routine-runs.js";
+import { logRunTiming } from "./run-timing.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
 import { querySpaceSearch } from "./search.js";
@@ -2116,14 +2117,21 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       send: authed.threads.send.handler(async ({ context, input }) => {
+        const sendStartedAt = Date.now();
         if ((await modelSetup(deps, context.actor)).needsModel) {
           throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
         }
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        logRunTiming("send.received", { threadId: target.threadId });
         if (target.kind === "bot") {
           await assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, target.botId);
         }
-        return sendThreadMessage(deps, context.actor, target, input);
+        const sent = await sendThreadMessage(deps, context.actor, target, input);
+        logRunTiming("send.returned", {
+          threadId: target.threadId,
+          ms: Date.now() - sendStartedAt,
+        });
+        return sent;
       }),
       react: authed.threads.react.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);

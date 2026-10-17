@@ -19,7 +19,12 @@ interface RuntimeCommand {
 // only the bot-id fence, so a new generation safely gets a fresh Container.
 const API_CONTAINER_GENERATION = "v6";
 const SCHEDULER_CONTAINER_GENERATION = "v3";
-const BOT_RUNTIME_GENERATION = "v10";
+const BOT_RUNTIME_GENERATION = "v11";
+// Bounded keep-warm: only bots with a dispatch in the last WARM_WINDOW_MS,
+// at most WARM_MAX_BOTS of them, are pinged by the cron.
+const WARM_PREFIX = "__edge/warm-bots/";
+const WARM_WINDOW_MS = 3 * 60 * 60 * 1000;
+const WARM_MAX_BOTS = 4;
 
 function runtimeCommand(value: unknown): RuntimeCommand | null {
   if (!value || typeof value !== "object") return null;
@@ -37,7 +42,12 @@ function runtimeCommand(value: unknown): RuntimeCommand | null {
   return { botId: candidate.botId, runId: candidate.runId };
 }
 
-async function runtimeRequest(request: Request, env: CloudflareEnv): Promise<Response> {
+async function runtimeRequest(
+  request: Request,
+  env: CloudflareEnv,
+  ctx?: ExecutionContext,
+): Promise<Response> {
+  const receivedAt = Date.now();
   if (!bearerAuthorized(request, env.RUNTIME_DISPATCH_SECRET)) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -60,9 +70,79 @@ async function runtimeRequest(request: Request, env: CloudflareEnv): Promise<Res
   if (new URL(request.url).pathname === "/__runtime/finished") {
     return runtime.fetch("https://runtime.internal/finished", { method: "POST", headers });
   }
-  return runtime.fetch(
+  ctx?.waitUntil(
+    env.OBJECT_STORE.put(`${WARM_PREFIX}${command.botId}`, String(Date.now())).catch(
+      () => undefined,
+    ),
+  );
+  const response = await runtime.fetch(
     `https://runtime.internal/runs/${encodeURIComponent(command.runId)}/continue`,
     { method: "POST", headers },
+  );
+  console.log(
+    JSON.stringify({
+      rakazo_timing: "edge.dispatch_returned",
+      ts: new Date().toISOString(),
+      botId: command.botId,
+      runId: command.runId,
+      status: response.status,
+      ms: Date.now() - receivedAt,
+    }),
+  );
+  return response;
+}
+
+async function warmRecentBots(env: CloudflareEnv): Promise<void> {
+  const listed = await env.OBJECT_STORE.list({ prefix: WARM_PREFIX, limit: 100 });
+  const now = Date.now();
+  const recent = listed.objects
+    .map((object) => ({
+      botId: object.key.slice(WARM_PREFIX.length),
+      at: object.uploaded.getTime(),
+    }))
+    .filter((item) => item.botId && now - item.at <= WARM_WINDOW_MS)
+    .sort((a, b) => b.at - a.at)
+    .slice(0, WARM_MAX_BOTS);
+  await Promise.allSettled(
+    recent.map(async ({ botId }) => {
+      const startedAt = Date.now();
+      const response = await env.BOT_RUNTIME_CONTAINERS.getByName(
+        `${BOT_RUNTIME_GENERATION}:${botId}`,
+      ).fetch("https://runtime.internal/warm", {
+        method: "POST",
+        headers: { "x-rakazo-bot-id": botId },
+      });
+      console.log(
+        JSON.stringify({
+          rakazo_timing: "edge.warm_bot",
+          ts: new Date().toISOString(),
+          botId,
+          status: response.status,
+          ms: Date.now() - startedAt,
+        }),
+      );
+    }),
+  );
+}
+
+async function warmApis(env: CloudflareEnv): Promise<void> {
+  const count = replicaCount(env.API_CONTAINER_REPLICAS, "API_CONTAINER_REPLICAS", 4);
+  await Promise.allSettled(
+    Array.from({ length: count }, async (_, index) => {
+      const startedAt = Date.now();
+      const response = await env.API_CONTAINERS.getByName(
+        `${API_CONTAINER_GENERATION}:api-${index}`,
+      ).fetch("https://api.internal/ready");
+      console.log(
+        JSON.stringify({
+          rakazo_timing: "edge.warm_api",
+          ts: new Date().toISOString(),
+          replica: index,
+          status: response.status,
+          ms: Date.now() - startedAt,
+        }),
+      );
+    }),
   );
 }
 
@@ -113,7 +193,7 @@ function isApiPath(pathname: string): boolean {
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/__edge/health") {
       return Response.json({ ok: true });
@@ -122,7 +202,7 @@ export default {
       request.method === "POST" &&
       (url.pathname === "/__runtime/dispatch" || url.pathname === "/__runtime/finished")
     ) {
-      return runtimeRequest(request, env);
+      return runtimeRequest(request, env, ctx);
     }
     if (
       (request.method === "POST" && url.pathname === "/__realtime/publish") ||
@@ -160,5 +240,7 @@ export default {
 
   scheduled(_controller, env, ctx): void {
     ctx.waitUntil(ensureSchedulers(env));
+    ctx.waitUntil(warmApis(env));
+    ctx.waitUntil(warmRecentBots(env));
   },
 } satisfies ExportedHandler<CloudflareEnv>;

@@ -9,6 +9,8 @@ const env = {
   COMPUTER_GATEWAY_SECRET: "computer-gateway-secret",
 } as CloudflareEnv;
 
+const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+
 type WorkerRequest = Parameters<typeof worker.fetch>[0];
 
 function workerRequest(url: string, init?: RequestInit): WorkerRequest {
@@ -20,6 +22,7 @@ describe("internal edge routes", () => {
     const response = await worker.fetch(
       workerRequest("https://api.example.com/__runtime/dispatch", { method: "POST" }),
       env,
+      ctx,
     );
     expect(response.status).toBe(401);
   });
@@ -28,6 +31,7 @@ describe("internal edge routes", () => {
     const response = await worker.fetch(
       workerRequest("https://api.example.com/__realtime/publish", { method: "POST" }),
       env,
+      ctx,
     );
     expect(response.status).toBe(401);
   });
@@ -36,6 +40,7 @@ describe("internal edge routes", () => {
     const response = await worker.fetch(
       workerRequest("https://api.example.com/__objects/list", { method: "POST" }),
       env,
+      ctx,
     );
     expect(response.status).toBe(401);
   });
@@ -44,6 +49,7 @@ describe("internal edge routes", () => {
     const response = await worker.fetch(
       workerRequest("https://api.example.com/__computers/computers", { method: "POST" }),
       env,
+      ctx,
     );
     expect(response.status).toBe(401);
   });
@@ -59,6 +65,7 @@ describe("internal edge routes", () => {
         body: "{}",
       }),
       env,
+      ctx,
     );
     expect(response.status).toBe(413);
   });
@@ -67,6 +74,7 @@ describe("internal edge routes", () => {
     const response = await worker.fetch(
       workerRequest("https://api.example.com/__runtime/unknown"),
       env,
+      ctx,
     );
     expect(response.status).toBe(404);
   });

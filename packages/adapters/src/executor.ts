@@ -317,6 +317,7 @@ import {
   secretPausedToolResult,
   tryCompleteConnectionWithCode,
 } from "./run-secret.js";
+import { logRunTiming } from "./run-timing.js";
 import { withRuntimeCleanup } from "./runtime-stream.js";
 import {
   cancelScheduleFromTool,
@@ -2634,7 +2635,11 @@ function desktopProtectionRewriteHint(reason: string): string {
   if (reason === "subshell") {
     return "Avoid unquoted parentheses (subshells). Quote literal text, or run sequential commands with ; or &&.";
   }
-  if (reason === "command substitution" || reason === "backtick" || reason === "arithmetic expansion") {
+  if (
+    reason === "command substitution" ||
+    reason === "backtick" ||
+    reason === "arithmetic expansion"
+  ) {
     return "Avoid $(...), backticks, and $((...)). Run the inner command on its own line, or quote the dollars as literal text.";
   }
   if (reason.startsWith("unresolved variable")) {
@@ -3319,6 +3324,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         data: { status: "running", startedAt: current.startedAt ?? new Date() },
       });
       if (started.count !== 1) return;
+      logRunTiming("run.leased", { runId, threadId: run.threadId, workerId });
       const leaseTarget = await deps.prisma.bot.findUniqueOrThrow({
         where: { id: run.botId },
         select: { computerId: true, computerSwitching: true },
@@ -3745,6 +3751,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const storedComputer = bot.computer;
         const computerMode = parseComputerMode(storedComputer.scope);
         const computerAvailable = deps.sandbox.describe().id !== "none";
+        const computerStartedAt = Date.now();
         const computer: ComputerRef = computerAvailable
           ? await provisionComputer(deps, storedComputer.id, context, "bot")
           : {
@@ -3753,6 +3760,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               kind: "docker",
               providerRef: "unavailable",
             };
+        logRunTiming("computer.ready", {
+          runId: run.id,
+          threadId: run.threadId,
+          ms: Date.now() - computerStartedAt,
+          available: computerAvailable,
+        });
         if (computerAvailable) {
           screenRelease = { computer, context };
           scheduleComputerSleep(deps.jobs, storedComputer.id);
@@ -3764,22 +3777,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
         );
         let currentTurnFiles: Awaited<ReturnType<typeof materializeCurrentTurnFiles>>;
         try {
-          currentTurnFiles = computerAvailable && deps.artifacts
-            ? await materializeCurrentTurnFiles(
-                {
-                  prisma: deps.prisma,
-                  artifacts: deps.artifacts,
-                  sandbox: deps.sandbox,
-                },
-                turnBlocks,
-                {
-                  context,
-                  computer,
-                  computerMode,
-                  markWorkspaceDirty: workspaceCheckpoint.markDirty,
-                },
-              )
-            : [];
+          currentTurnFiles =
+            computerAvailable && deps.artifacts
+              ? await materializeCurrentTurnFiles(
+                  {
+                    prisma: deps.prisma,
+                    artifacts: deps.artifacts,
+                    sandbox: deps.sandbox,
+                  },
+                  turnBlocks,
+                  {
+                    context,
+                    computer,
+                    computerMode,
+                    markWorkspaceDirty: workspaceCheckpoint.markDirty,
+                  },
+                )
+              : [];
         } catch (error) {
           await workspaceCheckpoint.flush().catch(() => undefined);
           throw error;
@@ -6460,6 +6474,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .map((candidate) => JSON.stringify([candidate.provider, candidate.modelId])),
         );
 
+        const modelStartedAt = Date.now();
+        let firstTokenLogged = false;
+        logRunTiming("model.request_start", {
+          runId,
+          threadId: thread.id,
+          provider: runModelProvider,
+          model: runModelId,
+        });
         try {
           const runtimeEvents = deps.runtime.run(
             {
@@ -6569,7 +6591,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               script,
               allowSilentEmpty: allowSilentEmptyRun,
               emptyResponseText,
-              executeTool: scripted ? undefined : applyTool,
+              executeTool: scripted
+                ? undefined
+                : async (name, args, executionId, route, observer) => {
+                    const toolStartedAt = Date.now();
+                    logRunTiming("tool.start", { runId, threadId: thread.id, tool: name });
+                    let ok = false;
+                    try {
+                      const result = await applyTool(name, args, executionId, route, observer);
+                      ok = true;
+                      return result;
+                    } finally {
+                      logRunTiming("tool.end", {
+                        runId,
+                        threadId: thread.id,
+                        tool: name,
+                        ok,
+                        ms: Date.now() - toolStartedAt,
+                      });
+                    }
+                  },
               resolveModel: scripted
                 ? undefined
                 : (provider, modelId) =>
@@ -6673,6 +6714,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
 
+            if (!firstTokenLogged && (event.type === "text" || event.type === "tool")) {
+              firstTokenLogged = true;
+              logRunTiming("model.first_token", {
+                runId,
+                threadId: thread.id,
+                kind: event.type,
+                ms: Date.now() - modelStartedAt,
+              });
+            }
             if (event.type === "text") {
               assembled += event.text;
               currentTextSegment += event.text;
@@ -6971,6 +7021,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
 
+          logRunTiming("model.stream_end", {
+            runId,
+            threadId: thread.id,
+            ms: Date.now() - modelStartedAt,
+          });
           if (approvalPausePending || !leaseValid) return;
           approvedEffectReplays.assertDrained();
           pendingProgress += progressRedactor.finish();

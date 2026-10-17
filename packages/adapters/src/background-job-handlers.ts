@@ -20,6 +20,7 @@ import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { logRunTiming } from "./run-timing.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
 
 export function createBackgroundJobHandlers(deps: {
@@ -56,15 +57,24 @@ export function createBackgroundJobHandlers(deps: {
 
   return {
     "run.continue": async (payload) => {
+      const pickedAt = Date.now();
       if (deps.runDispatcher) {
         const run = await deps.prisma.run.findUnique({
           where: { id: payload.runId },
-          select: { botId: true },
+          select: { botId: true, threadId: true },
         });
+        logRunTiming("scheduler.picked_up", { runId: payload.runId, threadId: run?.threadId });
         if (run) await deps.runDispatcher.dispatch({ runId: payload.runId, botId: run.botId });
+        logRunTiming("scheduler.dispatched", {
+          runId: payload.runId,
+          threadId: run?.threadId,
+          ms: Date.now() - pickedAt,
+        });
         return;
       }
+      logRunTiming("worker.picked_up", { runId: payload.runId });
       await deps.executor.continueRun(payload.runId, deps.workerId);
+      logRunTiming("run.final_persist", { runId: payload.runId, ms: Date.now() - pickedAt });
       // Automatic messaging mirror: once the run's bot messages are durable,
       // copy them into the outbox. Never let mirror failures fail the run.
       if (deps.messaging) {

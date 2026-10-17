@@ -84,9 +84,7 @@ const SANDBOX_PROVIDERS = new Set([
 ]);
 
 /** Default cloudflare; CONTAINER_ENV_JSON may select a supported remote provider (e.g. docker). */
-export function resolveCloudflareSandboxProvider(
-  optional: Record<string, string>,
-): string {
+export function resolveCloudflareSandboxProvider(optional: Record<string, string>): string {
   const requested = optional.SANDBOX_PROVIDER?.trim();
   if (requested && SANDBOX_PROVIDERS.has(requested)) return requested;
   return "cloudflare";
@@ -153,7 +151,7 @@ export function botRuntimeContainerEnv(env: CloudflareEnv, botId: string): Recor
     CLOUDFLARE_COMPUTER_URL: env.API_URL,
     DATABASE_URL: env.DATABASE_URL,
     DATA_DIR: "/tmp/rakazo",
-    DB_POOL_MAX: "1",
+    DB_POOL_MAX: "3",
     ENCRYPTION_KEY: env.ENCRYPTION_KEY,
     GRAPHILE_WORKER_CONCURRENCY: "1",
     HEALTH_HOST: "0.0.0.0",

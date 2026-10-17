@@ -42,6 +42,7 @@ import {
   resolveSendAttachments,
 } from "./artifacts.js";
 import { resolveBusyBotName, toComputerStatus } from "./computer-status.js";
+import { logRunTiming } from "./run-timing.js";
 import { withSerializableRetry } from "./serializable-retry.js";
 import { loadMessagePage } from "./thread-message-pages.js";
 
@@ -141,10 +142,13 @@ async function enqueueRunsNeedingContinue(
     runs
       .filter((run) => RUNS_NEEDING_CONTINUE.has(run.status))
       .map((run) =>
-        jobs.enqueue(runContinueJob(run.id)).catch((error) => {
-          // The queued run is durable; the reconciler repairs a missed immediate wake.
-          getLogger().error("thread send enqueue", error);
-        }),
+        jobs.enqueue(runContinueJob(run.id)).then(
+          () => logRunTiming("send.enqueued", { runId: run.id }),
+          (error) => {
+            // The queued run is durable; the reconciler repairs a missed immediate wake.
+            getLogger().error("thread send enqueue", error);
+          },
+        ),
       ),
   );
 }
