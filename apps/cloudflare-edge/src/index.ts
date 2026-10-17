@@ -19,7 +19,7 @@ interface RuntimeCommand {
 // only the bot-id fence, so a new generation safely gets a fresh Container.
 const API_CONTAINER_GENERATION = "v8";
 const SCHEDULER_CONTAINER_GENERATION = "v4";
-const BOT_RUNTIME_GENERATION = "v13";
+const BOT_RUNTIME_GENERATION = "v14";
 // Bounded keep-warm: only bots with a dispatch in the last WARM_WINDOW_MS,
 // at most WARM_MAX_BOTS of them, are pinged by the cron.
 const WARM_PREFIX = "__edge/warm-bots/";
