@@ -4,7 +4,6 @@ import {
   CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
   cloudflareGatewayRouting,
   connectedBackupOptions,
-  DEFAULT_MODEL_CONTEXT_WINDOW,
   DEFAULT_MODEL_MAX_TOKENS,
   MAX_MODEL_BACKUPS,
   MAX_MODEL_CONTEXT_WINDOW,
@@ -19,13 +18,16 @@ import {
   sameBackupChoices,
 } from "@rakazo/contracts";
 import {
+  applyProbedContextWindow,
   COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
+  contextWindowFieldValue,
   createModelProbe,
   featuredModelProviders,
   filterModelCatalog,
   initialModelProbeState,
   pickCatalogModelId,
+  probedContextWindow,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "expo-router";
@@ -65,6 +67,9 @@ import {
 import { mobileBackupScopeIsCurrent } from "../../lib/model-backups";
 import { native, useResolvedAppearance, useThemedStyles } from "../../lib/native";
 import { errorText } from "../../lib/user-error";
+
+const CONTEXT_LIMIT_HINT =
+  "Total tokens the model accepts (input + output). Max output tokens are reserved from it, and the rest decides how much instructions, tools and chat history fit. Use the model's real limit, e.g. 1048576 for a 1M model.";
 
 function connectionMaxTokensField(providerId: string, stored: number | undefined): string {
   if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
@@ -122,13 +127,24 @@ export default function Models() {
   const [reasoning, setReasoning] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
   const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
-  const [contextWindow, setContextWindow] = useState(String(DEFAULT_MODEL_CONTEXT_WINDOW));
+  // New connections start empty: the user (or /models) supplies the model's real window.
+  const [contextWindow, setContextWindowState] = useState("");
+  const contextWindowRef = useRef(contextWindow);
+  contextWindowRef.current = contextWindow;
+  /** Last value written by a /models probe, so a later probe may replace it. */
+  const probedContextWindowFillRef = useRef<string | null>(null);
+  const setContextWindow = (value: string) => {
+    probedContextWindowFillRef.current = null;
+    contextWindowRef.current = value;
+    setContextWindowState(value);
+  };
   const [supportsImages, setSupportsImages] = useState(false);
   const [maxImagesPerPrompt, setMaxImagesPerPrompt] = useState("");
   const [showEndpointHelp, setShowEndpointHelp] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [{ models: probeModels, probing }, setProbe] = useState(initialModelProbeState);
+  const [{ models: probeModels, contextWindows: probeContextWindows, probing }, setProbe] =
+    useState(initialModelProbeState);
   const [modelProbe] = useState(() => createModelProbe(setProbe));
   const resetOpenAiCompatibleProbe = modelProbe.reset;
   const [oauth, setOauth] = useState<ModelOAuthBegin | null>(null);
@@ -242,7 +258,7 @@ export default function Models() {
           nextCredential?.reasoning ? COMPATIBLE_THINKING_LEVELS : [],
         ) as ThinkingLevel | null,
       );
-      setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
+      setContextWindow(contextWindowFieldValue(nextCredential?.contextWindow));
       setSupportsImages(nextCredential?.supportsImages ?? false);
       setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
     } else {
@@ -521,7 +537,7 @@ export default function Models() {
       ) as ThinkingLevel | null,
     );
     setMaxTokens(connectionMaxTokensField(nextProvider, nextCredential?.maxTokens));
-    setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
+    setContextWindow(contextWindowFieldValue(nextCredential?.contextWindow));
     setSupportsImages(nextCredential?.supportsImages ?? false);
     setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
     setModelId(nextModelId);
@@ -540,11 +556,18 @@ export default function Models() {
     await modelProbe.probe({
       baseUrl,
       apiKey,
-      request: (input) => rpc<{ models: string[] }>("models/probeOpenAiCompatible", input),
-      onSuccess: (models) => {
+      request: (input) =>
+        rpc<{ models: string[]; contextWindows?: Record<string, number> }>(
+          "models/probeOpenAiCompatible",
+          input,
+        ),
+      onSuccess: (models, contextWindows) => {
         const next = modelId.trim() || models[0] || "";
-        if (next !== modelId) stageCompatibleModelId(next);
-        else setModelId(next);
+        if (next !== modelId) stageCompatibleModelId(next, contextWindows);
+        else {
+          setModelId(next);
+          fillProbedContextWindow(next, contextWindows);
+        }
         publishFeedback("probe", {
           notice:
             models.length === 0
@@ -622,8 +645,27 @@ export default function Models() {
     }
   }
 
-  function stageCompatibleModelId(nextModelId: string) {
+  function fillProbedContextWindow(
+    nextModelId: string,
+    windows: Record<string, number> = probeContextWindows,
+  ) {
+    const next = applyProbedContextWindow({
+      current: contextWindowRef.current,
+      autoFilled: probedContextWindowFillRef.current,
+      probed: probedContextWindow(windows, nextModelId),
+    });
+    if (next.value === contextWindowRef.current) return;
+    contextWindowRef.current = next.value;
+    setContextWindowState(next.value);
+    probedContextWindowFillRef.current = next.autoFilled;
+  }
+
+  function stageCompatibleModelId(
+    nextModelId: string,
+    windows: Record<string, number> = probeContextWindows,
+  ) {
     setModelId(nextModelId);
+    fillProbedContextWindow(nextModelId, windows);
     setThinkingLevel(
       clampCatalogThinkingLevel(
         credential?.modelId === nextModelId ? credential.thinkingLevel : null,
@@ -684,7 +726,17 @@ export default function Models() {
     const parsedContextWindow = isOpenAiCompatible
       ? parseModelContextWindow(contextWindow)
       : undefined;
+    if (isOpenAiCompatible && !contextWindow.trim()) {
+      setShowAdvanced(true);
+      publishFeedback("connection", {
+        error: t(
+          "Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation.",
+        ),
+      });
+      return;
+    }
     if (isOpenAiCompatible && parsedContextWindow === undefined) {
+      setShowAdvanced(true);
       publishFeedback("connection", {
         error: t("Enter a whole number from 1 to {max} for the context limit.", {
           max: MAX_MODEL_CONTEXT_WINDOW,
@@ -868,22 +920,35 @@ export default function Models() {
     value: string,
     onChangeText: (next: string) => void,
     maxLength: number,
+    extra?: { hint?: string; placeholder?: string },
   ) {
     return (
       <View>
         <Text style={styles.sectionTitle}>{label}</Text>
         <TextInput
           accessibilityLabel={label}
+          accessibilityHint={extra?.hint}
           editable={!busy}
           keyboardType="number-pad"
           maxLength={maxLength}
           onChangeText={onChangeText}
+          placeholder={extra?.placeholder}
+          placeholderTextColor={native.tertiaryLabel}
           style={styles.keyInput}
           value={value}
         />
+        {extra?.hint ? <Text style={styles.hint}>{extra.hint}</Text> : null}
       </View>
     );
   }
+
+  const probedWindow = probedContextWindow(probeContextWindows, modelId);
+  const contextLimitHint =
+    probedWindow !== undefined && contextWindow.trim() !== String(probedWindow)
+      ? `${t(CONTEXT_LIMIT_HINT)} ${t("The server reports {reported} tokens for this model.", {
+          reported: probedWindow,
+        })}`
+      : t(CONTEXT_LIMIT_HINT);
 
   const compatConfig = isOpenAiCompatible ? (
     <>
@@ -1033,7 +1098,10 @@ export default function Models() {
               />
             </View>
           </View>
-          {limitField(t("Context limit"), contextWindow, setContextWindow, 7)}
+          {limitField(t("Context limit"), contextWindow, setContextWindow, 10, {
+            hint: contextLimitHint,
+            placeholder: t("Required, e.g. 131072"),
+          })}
           {limitField(t("Maximum output tokens"), maxTokens, setMaxTokens, 6)}
           {supportsImages
             ? limitField(

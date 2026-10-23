@@ -11,6 +11,7 @@ import {
   OPENAI_COMPATIBLE_CATALOG_MODEL_ID,
   openAiCompatibleCatalogProvider,
   prepareOpenAiCompatibleConnect,
+  probeOpenAiCompatibleModelList,
   probeOpenAiCompatibleModels,
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
@@ -378,6 +379,30 @@ describe("openai-compatible provider", () => {
     await expect(
       probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
     ).resolves.toEqual(["a", "b"]);
+  });
+
+  it("reports advertised context windows from /v1/models when present", async () => {
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          object: "list",
+          data: [
+            { id: "openrouter", context_length: 1_000_000 },
+            { id: "vllm", max_model_len: "131072" },
+            { id: "nested", top_provider: { context_length: 262_144 } },
+            { id: "too-small", context_length: 512 },
+            { id: "garbage", context_length: "lots" },
+            { id: "plain" },
+          ],
+        }),
+        { status: 200 },
+      );
+    await expect(
+      probeOpenAiCompatibleModelList({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+    ).resolves.toEqual({
+      models: ["openrouter", "vllm", "nested", "too-small", "garbage", "plain"],
+      contextWindows: { openrouter: 1_000_000, vllm: 131_072, nested: 262_144 },
+    });
   });
 
   it("still accepts legacy models[] probe responses", async () => {

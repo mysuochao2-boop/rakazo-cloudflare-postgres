@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { Checkbox } from "./components/ui/checkbox.js";
 import { Input } from "./components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "./components/ui/native-select.js";
@@ -25,6 +25,9 @@ export function ModelThinkingOptions({
   contextWindow,
   onContextWindowChange,
   contextWindowLabel,
+  contextWindowHint,
+  contextWindowPlaceholder,
+  contextWindowRequired = false,
   imagesLabel,
   maxImagesLabel,
 }: {
@@ -49,6 +52,11 @@ export function ModelThinkingOptions({
   contextWindow?: string;
   onContextWindowChange?: (contextWindow: string) => void;
   contextWindowLabel?: string;
+  /** One line under the field: what the number controls. */
+  contextWindowHint?: string;
+  contextWindowPlaceholder?: string;
+  /** Required and still empty: the Advanced section opens so the field is visible. */
+  contextWindowRequired?: boolean;
   imagesLabel?: string;
   maxImagesLabel?: string;
 }) {
@@ -58,8 +66,16 @@ export function ModelThinkingOptions({
   const contextWindowId = useId();
   const imagesId = useId();
   const maxImagesId = useId();
+  const contextWindowHintId = useId();
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const contextWindowMissing =
+    contextWindowRequired && onContextWindowChange !== undefined && !contextWindow?.trim();
+  useEffect(() => {
+    // Only ever opens: collapsing while the user types would hide the field.
+    if (contextWindowMissing && detailsRef.current) detailsRef.current.open = true;
+  }, [contextWindowMissing]);
   return (
-    <details className="mt-4 text-sm text-muted-foreground">
+    <details ref={detailsRef} className="mt-4 text-sm text-muted-foreground">
       <summary className="cursor-pointer">{advancedLabel}</summary>
       {showThinking && onReasoningChange && thinkingLabel ? (
         <label htmlFor={id} className="mt-3 flex items-center gap-2">
@@ -115,22 +131,34 @@ export function ModelThinkingOptions({
         </label>
       ) : null}
       {onContextWindowChange && contextWindowLabel ? (
-        <label htmlFor={contextWindowId} className="mt-3 flex items-center gap-2">
-          <span className="min-w-0 flex-1">{contextWindowLabel}</span>
-          <Input
-            id={contextWindowId}
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={1048576}
-            step={1}
-            value={contextWindow ?? ""}
-            onChange={(event) => onContextWindowChange(event.target.value)}
-            disabled={disabled}
-            aria-label={contextWindowLabel}
-            className="h-8 w-24 text-center text-foreground"
-          />
-        </label>
+        <div className="mt-3">
+          <label htmlFor={contextWindowId} className="flex items-center gap-2">
+            <span className="min-w-0 flex-1">{contextWindowLabel}</span>
+            <Input
+              id={contextWindowId}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={2147483647}
+              step={1}
+              value={contextWindow ?? ""}
+              placeholder={contextWindowPlaceholder}
+              onChange={(event) => onContextWindowChange(event.target.value)}
+              disabled={disabled}
+              required={contextWindowRequired}
+              aria-required={contextWindowRequired || undefined}
+              aria-invalid={contextWindowMissing || undefined}
+              aria-describedby={contextWindowHint ? contextWindowHintId : undefined}
+              aria-label={contextWindowLabel}
+              className="h-8 w-28 text-center text-foreground"
+            />
+          </label>
+          {contextWindowHint ? (
+            <p id={contextWindowHintId} className="mt-1 text-xs">
+              {contextWindowHint}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {onSupportsImagesChange ? (
         <label htmlFor={imagesId} className="mt-3 flex items-center gap-2">

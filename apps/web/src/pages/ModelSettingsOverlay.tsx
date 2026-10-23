@@ -4,7 +4,6 @@ import type { Me, ThinkingLevel } from "@rakazo/contracts";
 import {
   CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
   cloudflareGatewayRouting,
-  DEFAULT_MODEL_CONTEXT_WINDOW,
   DEFAULT_MODEL_MAX_TOKENS,
   MAX_MODEL_CONTEXT_WINDOW,
   MAX_MODEL_MAX_TOKENS,
@@ -16,12 +15,15 @@ import {
   parseModelMaxTokens,
 } from "@rakazo/contracts";
 import {
+  applyProbedContextWindow,
   COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
+  contextWindowFieldValue,
   createModelProbe,
   filterModelCatalog,
   initialModelProbeState,
   pickCatalogModelId,
+  probedContextWindow,
 } from "@rakazo/core";
 import {
   AlertDialog,
@@ -63,6 +65,7 @@ import {
   runModelConnectionPreflight,
   unavailableSelectedModel,
 } from "../lib/model-connection-preflight";
+import { contextLimitHint } from "../lib/model-context-limit";
 import { rpc } from "../lib/rpc";
 import { useModelOAuthSignIn } from "../lib/use-model-oauth-signin";
 import { errorText } from "../lib/user-error";
@@ -103,10 +106,20 @@ export function ModelSettingsOverlay({
   const [reasoning, setReasoning] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
   const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
-  const [contextWindow, setContextWindow] = useState(String(DEFAULT_MODEL_CONTEXT_WINDOW));
+  const [contextWindow, setContextWindowState] = useState("");
+  const contextWindowRef = useRef(contextWindow);
+  contextWindowRef.current = contextWindow;
+  /** Last value written by a /models probe, so a later probe may replace it. */
+  const probedContextWindowFillRef = useRef<string | null>(null);
+  const setContextWindow = (value: string) => {
+    probedContextWindowFillRef.current = null;
+    contextWindowRef.current = value;
+    setContextWindowState(value);
+  };
   const [supportsImages, setSupportsImages] = useState(false);
   const [maxImagesPerPrompt, setMaxImagesPerPrompt] = useState("");
-  const [{ models: probeModels, probing }, setProbe] = useState(initialModelProbeState);
+  const [{ models: probeModels, contextWindows: probeContextWindows, probing }, setProbe] =
+    useState(initialModelProbeState);
   const [modelProbe] = useState(() => createModelProbe(setProbe));
   const resetOpenAiCompatibleProbe = modelProbe.reset;
   const [codeCopied, copyOAuthCode] = useCopyText();
@@ -189,7 +202,7 @@ export function ModelSettingsOverlay({
             nextCredential?.reasoning ? COMPATIBLE_THINKING_LEVELS : [],
           ) as ThinkingLevel | null,
         );
-        setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
+        setContextWindow(contextWindowFieldValue(nextCredential?.contextWindow));
         setSupportsImages(nextCredential?.supportsImages ?? false);
         setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
       } else {
@@ -364,8 +377,27 @@ export function ModelSettingsOverlay({
     invalidatePreflight();
   }
 
-  function stageCompatibleModelId(nextModelId: string) {
+  function fillProbedContextWindow(
+    nextModelId: string,
+    windows: Record<string, number> = probeContextWindows,
+  ) {
+    const next = applyProbedContextWindow({
+      current: contextWindowRef.current,
+      autoFilled: probedContextWindowFillRef.current,
+      probed: probedContextWindow(windows, nextModelId),
+    });
+    if (next.value === contextWindowRef.current) return;
+    contextWindowRef.current = next.value;
+    setContextWindowState(next.value);
+    probedContextWindowFillRef.current = next.autoFilled;
+  }
+
+  function stageCompatibleModelId(
+    nextModelId: string,
+    windows: Record<string, number> = probeContextWindows,
+  ) {
     setModelId(nextModelId);
+    fillProbedContextWindow(nextModelId, windows);
     setThinkingLevel(
       clampCatalogThinkingLevel(
         credential?.modelId === nextModelId ? credential.thinkingLevel : null,
@@ -398,7 +430,7 @@ export function ModelSettingsOverlay({
       ) as ThinkingLevel | null,
     );
     setMaxTokens(connectionMaxTokensField(nextProvider, nextCredential?.maxTokens));
-    setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
+    setContextWindow(contextWindowFieldValue(nextCredential?.contextWindow));
     setSupportsImages(nextCredential?.supportsImages ?? false);
     setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
     setModelId(nextModelId);
@@ -425,12 +457,15 @@ export function ModelSettingsOverlay({
       baseUrl,
       apiKey,
       request: rpc.models.probeOpenAiCompatible,
-      onSuccess: (models) => {
+      onSuccess: (models, contextWindows) => {
         if (!preflightStillCurrent(revision)) return;
         const current = modelIdRef.current;
         const next = current.trim() || models[0] || "";
-        if (next !== current) stageCompatibleModelId(next);
-        else setModelId(next);
+        if (next !== current) stageCompatibleModelId(next, contextWindows);
+        else {
+          setModelId(next);
+          fillProbedContextWindow(next, contextWindows);
+        }
         const unavailable = unavailableSelectedModel(current, models);
         if (unavailable) {
           setPreflightFailure(unavailable);
@@ -583,6 +618,12 @@ export function ModelSettingsOverlay({
     const parsedContextWindow = isOpenAiCompatible
       ? parseModelContextWindow(contextWindow)
       : undefined;
+    if (isOpenAiCompatible && !contextWindow.trim()) {
+      setError(
+        t`Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation.`,
+      );
+      return;
+    }
     if (isOpenAiCompatible && parsedContextWindow === undefined) {
       setError(
         t`Enter a whole number from 1 to ${MAX_MODEL_CONTEXT_WINDOW} for the context limit.`,
@@ -1386,6 +1427,12 @@ export function ModelSettingsOverlay({
                       setNotice(null);
                     }}
                     contextWindowLabel={t`Context limit`}
+                    contextWindowRequired
+                    contextWindowPlaceholder={t`Required, e.g. 131072`}
+                    contextWindowHint={contextLimitHint(
+                      probedContextWindow(probeContextWindows, modelId),
+                      contextWindow,
+                    )}
                     supportsImages={supportsImages}
                     onSupportsImagesChange={(value) => {
                       selectionRevisionRef.current += 1;

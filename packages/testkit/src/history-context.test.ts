@@ -1,11 +1,11 @@
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
-import { PiAgentRuntime } from "@rakazo/adapters";
+import { estimateTextTokens, PiAgentRuntime } from "@rakazo/adapters";
 import { describe, expect, it } from "vitest";
 import { startModelEmulator } from "./model-emulator.js";
 
 describe("structured results through real Pi context selection", () => {
   it("preserves valid history JSON and follows a shortened original-text cursor", async () => {
-    const original = `Verified original fact: ORBIT-731.\n${'"\n'.repeat(2000)}`;
+    const original = `Verified original fact: ORBIT-731.\n${'"\n'.repeat(6000)}`;
     let cursor = 0;
     let calls = 0;
     const server = await startModelEmulator({
@@ -28,7 +28,7 @@ describe("structured results through real Pi context selection", () => {
             expect(result.messages[0].truncated).toBe(true);
             cursor = result.messages[0].nextTextOffset;
             expect(cursor).toBeGreaterThan(0);
-            expect(cursor).toBeLessThan(2000);
+            expect(cursor).toBeLessThan(6000);
             expect(result.messages[0].text).toBe(original.slice(0, cursor));
           },
           response: () => ({
@@ -116,7 +116,7 @@ describe("structured results through real Pi context selection", () => {
         steps: Array.from({ length: 13 }, (_, index) => ({
           expect(request) {
             const serialized = JSON.stringify(request.messages);
-            expect(Buffer.byteLength(serialized)).toBeLessThan(3584);
+            expect(estimateTextTokens(serialized)).toBeLessThan(3584);
             expect(serialized).toContain("Approval remains pending");
             expect(serialized).not.toContain("obsolete-old-0");
             if (index > 0) {

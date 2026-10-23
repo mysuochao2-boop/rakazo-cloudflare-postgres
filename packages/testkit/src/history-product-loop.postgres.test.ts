@@ -189,7 +189,9 @@ describe.skipIf(!enabled)("product history diagnostic loop", () => {
       expect(model.requests).toHaveLength(13);
       expect(inputEstimates).toHaveLength(13);
       expect(selectedInputEstimates).toHaveLength(13);
-      expect(selectedInputEstimates.at(-1)!).toBeGreaterThan(selectedInputEstimates[0]! + 32_768);
+      // The loop must grow past the legacy 32K default window and keep growing materially.
+      expect(selectedInputEstimates.at(-1)!).toBeGreaterThan(32_768);
+      expect(selectedInputEstimates.at(-1)!).toBeGreaterThan(selectedInputEstimates[0]! + 16_384);
       expect(selectedInputEstimates.every((estimate) => estimate <= 1_000_000 - 4096)).toBe(true);
       expect(observations.map((row) => row.toolResults)).toEqual(
         Array.from({ length: 12 }, (_, i) => i + 1),

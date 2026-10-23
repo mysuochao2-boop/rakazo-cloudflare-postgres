@@ -99,6 +99,10 @@ msgstr ""
 msgid "{amount} / {period}"
 msgstr ""
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "{botName} · Runtime logs"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "{botName}’s computer"
 msgstr "{botName} 的电脑"
@@ -415,6 +419,10 @@ msgstr "Agent："
 msgid "All bots"
 msgstr ""
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "All lanes"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr ""
@@ -519,6 +527,11 @@ msgstr "API 密钥"
 #: src/pages/PluginsOverlay.tsx
 msgid "API key header"
 msgstr "API 密钥请求头"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "API URL"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Appearance"
@@ -673,6 +686,10 @@ msgstr "返回"
 #: src/pages/Auth.tsx
 msgid "Back to sign in"
 msgstr "返回登录"
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Background"
+msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models"
@@ -948,6 +965,7 @@ msgid "Client secret"
 msgstr ""
 
 #: src/components/ErrorBoundary.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
@@ -1225,6 +1243,7 @@ msgid "Continue with email"
 msgstr "使用邮箱继续"
 
 #: src/components/ComputersUnavailableHint.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Copied"
@@ -1238,6 +1257,10 @@ msgstr "复制"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
+msgstr ""
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Copy run ID"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -1465,6 +1488,10 @@ msgstr "无法加载模型设置"
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "无法加载运行历史记录"
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Could not load runtime logs."
+msgstr ""
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -2098,6 +2125,15 @@ msgstr "请输入 1 到 1000 之间的整数作为图像限制。"
 msgid "Enter an API key before testing."
 msgstr "测试前请输入 API 密钥。"
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation."
+msgstr "请填写模型的上下文限制（token 数）。「查找模型」可能会自动填写，否则请查阅模型文档。"
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Errors only"
+msgstr ""
+
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Every"
@@ -2443,6 +2479,10 @@ msgstr ""
 msgid "Integrations"
 msgstr "集成"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Interactive"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Interval"
@@ -2494,6 +2534,10 @@ msgstr "密钥"
 msgid "Knowledge"
 msgstr "知识"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Lane"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Language"
 msgstr "语言"
@@ -2536,6 +2580,10 @@ msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Listening"
+msgstr ""
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Live"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -2589,6 +2637,7 @@ msgstr "正在加载语音提供方…"
 #: src/App.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/Auth.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/IntegrationSetup.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
@@ -3057,6 +3106,10 @@ msgstr ""
 msgid "No runs yet"
 msgstr "还没有运行记录"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "No runtime logs yet."
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "暂无技能"
@@ -3415,6 +3468,10 @@ msgstr "重新连接 OAuth"
 msgid "Reconnecting"
 msgstr "正在重新连接"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Reconnecting…"
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Recording may have started, but the view could not refresh"
 msgstr ""
@@ -3604,6 +3661,11 @@ msgstr ""
 msgid "Replying to {0}"
 msgstr ""
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Required, e.g. 131072"
+msgstr "必填，例如 131072"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Research & writing"
 msgstr "调研和写作"
@@ -3668,6 +3730,7 @@ msgid "Retry"
 msgstr "重试"
 
 #: src/App.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/PeerMessagesOverlay.tsx
 msgid "Retry now"
 msgstr "立即重试"
@@ -3718,6 +3781,11 @@ msgstr "例行任务"
 msgid "Routines that run while you're away"
 msgstr ""
 
+#. placeholder {0}: runFilter.slice(-8)
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Run {0} ×"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Run at"
 msgstr "运行时间"
@@ -3748,6 +3816,14 @@ msgstr "正在运行…"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Runs when this bot receives a verified message from this provider."
+msgstr ""
+
+#: src/pages/BotContextMenu.tsx
+msgid "Runtime logs"
+msgstr ""
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Runtime logs are off."
 msgstr ""
 
 #: src/components/AskCard.tsx
@@ -4290,6 +4366,10 @@ msgstr "提供方正在限制请求频率。"
 msgid "The selected memory provider is not available in this build."
 msgstr "所选记忆提供方在此构建中不可用。"
 
+#: src/lib/model-context-limit.ts
+msgid "The server reports {reported} tokens for this model."
+msgstr "服务器报告该模型的上下文为 {reported} tokens。"
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
 msgstr ""
@@ -4419,6 +4499,10 @@ msgstr "工具源"
 #: src/pages/PluginsOverlay.tsx
 msgid "Tools"
 msgstr ""
+
+#: src/lib/model-context-limit.ts
+msgid "Total tokens the model accepts (input + output). Max output tokens are reserved from it, and the rest decides how much instructions, tools and chat history fit. Use the model's real limit, e.g. 1048576 for a 1M model."
+msgstr "模型可接收的总 token 数（输入 + 输出）。其中会预留「最大输出 token」，剩余部分决定能放下多少指令、工具和聊天记录。请填写模型的真实上限，例如 1M 模型填 1048576。"
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"

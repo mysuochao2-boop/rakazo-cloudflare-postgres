@@ -785,4 +785,14 @@ export const DE_MESSAGES: Record<string, string> = {
     "Melde dich bei deinem bestehenden Konto an, um SSO zu verknüpfen",
   "SSO is temporarily unavailable. Try again.":
     "SSO ist vorübergehend nicht verfügbar. Versuche es erneut.",
+  "Total tokens the model accepts (input + output). Max output tokens are reserved from it, and the rest decides how much instructions, tools and chat history fit. Use the model's real limit, e.g. 1048576 for a 1M model.":
+    "Gesamtzahl der Token, die das Modell annimmt (Eingabe + Ausgabe). Davon werden die maximalen Ausgabe-Token reserviert; der Rest bestimmt, wie viel Anweisungen, Tools und Chatverlauf passen. Trage das echte Limit des Modells ein, z. B. 1048576 für ein 1M-Modell.",
+  "The server reports {reported} tokens for this model.":
+    "Der Server meldet {reported} Token für dieses Modell.",
+  "Required, e.g. 131072": "Erforderlich, z. B. 131072",
+  "Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation.":
+    "Gib das Kontextlimit des Modells in Token ein. „Modelle suchen“ kann es ausfüllen, sonst sieh in der Dokumentation des Modells nach.",
+  "API URL": "API-URL",
+  "API URL (optional)": "API-URL (optional)",
+  "https://api.example.com": "https://api.example.com",
 };

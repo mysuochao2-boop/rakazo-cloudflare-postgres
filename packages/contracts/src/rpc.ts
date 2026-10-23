@@ -232,7 +232,13 @@ export const appContract = {
           apiKey: z.string().optional(),
         }),
       )
-      .output(z.object({ models: z.array(z.string()) })),
+      .output(
+        z.object({
+          models: z.array(z.string()),
+          /** Model id -> context window the server advertised on /models, when it did. */
+          contextWindows: z.record(z.string(), z.number().int().positive()).optional(),
+        }),
+      ),
     probeCatalog: oc
       .input(
         z.object({

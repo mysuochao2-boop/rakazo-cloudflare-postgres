@@ -764,4 +764,14 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Send deletion code": "发送删除验证码",
   "Sign in to your existing account to link SSO": "请登录现有账户以关联 SSO",
   "SSO is temporarily unavailable. Try again.": "SSO 暂时不可用，请重试。",
+  "Total tokens the model accepts (input + output). Max output tokens are reserved from it, and the rest decides how much instructions, tools and chat history fit. Use the model's real limit, e.g. 1048576 for a 1M model.":
+    "模型可接收的总 token 数（输入 + 输出）。其中会预留「最大输出 token」，剩余部分决定能放下多少指令、工具和聊天记录。请填写模型的真实上限，例如 1M 模型填 1048576。",
+  "The server reports {reported} tokens for this model.":
+    "服务器报告该模型的上下文为 {reported} tokens。",
+  "Required, e.g. 131072": "必填，例如 131072",
+  "Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation.":
+    "请填写模型的上下文限制（token 数）。「查找模型」可能会自动填写，否则请查阅模型文档。",
+  "API URL": "API 地址",
+  "API URL (optional)": "API 地址（可选）",
+  "https://api.example.com": "https://api.example.com",
 };

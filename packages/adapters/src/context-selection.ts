@@ -31,13 +31,49 @@ export interface ContextSelectionOptions {
   /** Keep tool protocol intact while shortening oversized result bodies. */
   truncateToolResults?: boolean;
 }
+export const CONTEXT_BUDGET_ERROR_PREFIX = "Required context exceeds the model context budget";
+/** Numbers only: safe for run errors and live runtime logs. */
+export interface ContextBudgetDetails {
+  /** Estimated input tokens that cannot be dropped (system prompt, tools, current turn). */
+  requiredTokens: number;
+  /** Input tokens left after reserving maxTokens for output: contextWindow - maxTokens. */
+  availableTokens: number;
+  contextWindow: number;
+  maxTokens: number;
+}
 export class ContextBudgetError extends Error {
+  public readonly requiredTokens: number;
+  public readonly contextWindow: number;
+  public readonly maxTokens: number;
   constructor(
+    /** @deprecated alias of requiredTokens */
     public readonly estimatedTokens: number,
     public readonly availableTokens: number,
+    limits: { contextWindow: number; maxTokens: number } = {
+      contextWindow: availableTokens,
+      maxTokens: 0,
+    },
   ) {
-    super("Required context exceeds the model context budget");
+    const required = Math.ceil(estimatedTokens);
+    const available = Math.floor(availableTokens);
+    super(
+      `${CONTEXT_BUDGET_ERROR_PREFIX}: required ~${required} tokens, available ${available} ` +
+        `(contextWindow ${limits.contextWindow} - maxTokens ${limits.maxTokens}). ` +
+        "If the model supports a larger window, raise its Context limit in model settings " +
+        "(or lower Max output tokens).",
+    );
     this.name = "ContextBudgetError";
+    this.requiredTokens = required;
+    this.contextWindow = limits.contextWindow;
+    this.maxTokens = limits.maxTokens;
+  }
+  details(): ContextBudgetDetails {
+    return {
+      requiredTokens: this.requiredTokens,
+      availableTokens: Math.floor(this.availableTokens),
+      contextWindow: this.contextWindow,
+      maxTokens: this.maxTokens,
+    };
   }
 }
 function imageBlocks(value: unknown): object[] {
@@ -72,7 +108,35 @@ function imageBlocks(value: unknown): object[] {
   } else visitMessage(value);
   return found;
 }
-/** Conservative byte bound plus framing, not a tokenizer. Only actual user/tool
+/** ASCII bytes per estimated token. BPE tokenizers average ~4 bytes per token on
+ * English prose and ~3 on JSON schemas, code and base64, so 3 stays conservative
+ * for the system prompt and tool definitions that dominate fixed context. */
+export const ASCII_BYTES_PER_ESTIMATED_TOKEN = 3;
+
+/** Tokenizer-free text estimate: ceil(ASCII bytes / 3) plus one token per
+ * non-ASCII code point (CJK, Cyrillic, emoji ...). A plain ceil(UTF-8 bytes / 3)
+ * would undercount two-byte scripts, which tokenize closer to one token per
+ * character. The old 1:1 byte bound overcounted English/JSON roughly 3-4x and
+ * rejected short prompts on 32k-window models. */
+export function estimateTextTokens(text: string): number {
+  let ascii = 0;
+  let other = 0;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) ascii += 1;
+    else {
+      other += 1;
+      // A surrogate pair is one code point.
+      if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+        const next = text.charCodeAt(index + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) index += 1;
+      }
+    }
+  }
+  return Math.ceil(ascii / ASCII_BYTES_PER_ESTIMATED_TOKEN) + other;
+}
+
+/** Conservative ratio estimate plus framing, not a tokenizer. Only actual user/tool
  * image blocks receive an adapter estimate; image-shaped tool arguments remain text.
  */
 export function estimateContextTokens(
@@ -94,7 +158,7 @@ export function estimateContextTokens(
     JSON.stringify(value, (_key, item: unknown) =>
       item && typeof item === "object" && images.has(item) ? { type: "image" } : item,
     ) ?? "";
-  return Buffer.byteLength(serialized, "utf8") + imageTotal + 16;
+  return estimateTextTokens(serialized) + imageTotal + 16;
 }
 function fixedTokens(budget: ContextBudget): number {
   for (const value of [
@@ -321,7 +385,7 @@ export function selectContext<T extends ContextMessage>(
   droppedMessages: number;
   truncatedToolResults: number;
   availableMessageTokens: number;
-  estimation: "utf8-byte-bound";
+  estimation: "utf8-ratio-estimate";
 } {
   const fixed = fixedTokens(options.budget);
   const available = Math.floor(options.budget.contextWindow - options.budget.outputReserve - fixed);
@@ -399,6 +463,7 @@ export function selectContext<T extends ContextMessage>(
     throw new ContextBudgetError(
       used + fixed,
       options.budget.contextWindow - options.budget.outputReserve,
+      { contextWindow: options.budget.contextWindow, maxTokens: options.budget.outputReserve },
     );
   }
   const keepPrefix =
@@ -425,7 +490,7 @@ export function selectContext<T extends ContextMessage>(
     droppedMessages: messages.length - selectedIndexes.size,
     truncatedToolResults: 0,
     availableMessageTokens: available,
-    estimation: "utf8-byte-bound" as const,
+    estimation: "utf8-ratio-estimate" as const,
   };
 }
 

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createModelProbe, initialModelProbeState } from "./model-probe.js";
+import {
+  applyProbedContextWindow,
+  contextWindowFieldValue,
+  createModelProbe,
+  initialModelProbeState,
+  probedContextWindow,
+} from "./model-probe.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -35,10 +41,35 @@ describe("model probe lifecycle", () => {
       apiKey: "fake-key",
     });
     expect(onChange.mock.calls).toEqual([
-      [{ models: [], baseUrl: null, probing: true }],
-      [{ models: [], baseUrl: "https://models.example.test/v1", probing: false }],
+      [{ models: [], contextWindows: {}, baseUrl: null, probing: true }],
+      [
+        {
+          models: [],
+          contextWindows: {},
+          baseUrl: "https://models.example.test/v1",
+          probing: false,
+        },
+      ],
     ]);
-    expect(onSuccess).toHaveBeenCalledWith([]);
+    expect(onSuccess).toHaveBeenCalledWith([], {});
+  });
+
+  it("keeps context windows advertised by the server", async () => {
+    const { controller, input, onChange, onSuccess } = setup();
+    const request = vi
+      .fn()
+      .mockResolvedValue({ models: ["big", "small"], contextWindows: { big: 1_048_576 } });
+    await controller.probe({ ...input, request });
+    expect(onChange).toHaveBeenLastCalledWith({
+      models: ["big", "small"],
+      contextWindows: { big: 1_048_576 },
+      baseUrl: "https://models.example.test/v1",
+      probing: false,
+    });
+    expect(onSuccess).toHaveBeenCalledWith(["big", "small"], { big: 1_048_576 });
+    expect(probedContextWindow({ big: 1_048_576 }, " big ")).toBe(1_048_576);
+    expect(probedContextWindow({ big: 1_048_576 }, "small")).toBeUndefined();
+    expect(probedContextWindow({ big: 1_048_576 }, "toString")).toBeUndefined();
   });
 
   it.each(["provider", "key", "URL"])("ignores a result after the %s changes", async () => {
@@ -73,11 +104,16 @@ describe("model probe lifecycle", () => {
     const second = controller.probe({ ...input, request: () => current.promise });
     old.resolve({ models: ["old-model"] });
     await first;
-    expect(onChange).toHaveBeenLastCalledWith({ models: [], baseUrl: null, probing: true });
+    expect(onChange).toHaveBeenLastCalledWith({
+      models: [],
+      contextWindows: {},
+      baseUrl: null,
+      probing: true,
+    });
     expect(onSuccess).not.toHaveBeenCalled();
     current.resolve({ models: ["current-model"] });
     await second;
-    expect(onSuccess).toHaveBeenCalledExactlyOnceWith(["current-model"]);
+    expect(onSuccess).toHaveBeenCalledExactlyOnceWith(["current-model"], {});
   });
 
   it("clears probing after failure and omits a blank key", async () => {
@@ -91,5 +127,30 @@ describe("model probe lifecycle", () => {
     });
     expect(onChange).toHaveBeenLastCalledWith(initialModelProbeState);
     expect(onError).toHaveBeenCalledWith(error);
+  });
+});
+
+describe("context limit field", () => {
+  it("keeps saved limits and leaves new connections empty", () => {
+    expect(contextWindowFieldValue(1_048_576)).toBe("1048576");
+    expect(contextWindowFieldValue(undefined)).toBe("");
+    expect(contextWindowFieldValue(null)).toBe("");
+  });
+
+  it("fills from the probe only when empty or still probe-filled", () => {
+    expect(applyProbedContextWindow({ current: "", autoFilled: null, probed: 131_072 })).toEqual({
+      value: "131072",
+      autoFilled: "131072",
+    });
+    expect(
+      applyProbedContextWindow({ current: "131072", autoFilled: "131072", probed: 1_048_576 }),
+    ).toEqual({ value: "1048576", autoFilled: "1048576" });
+    expect(
+      applyProbedContextWindow({ current: "65536", autoFilled: "131072", probed: 1_048_576 }),
+    ).toEqual({ value: "65536", autoFilled: "131072" });
+    expect(applyProbedContextWindow({ current: "", autoFilled: null, probed: undefined })).toEqual({
+      value: "",
+      autoFilled: null,
+    });
   });
 });

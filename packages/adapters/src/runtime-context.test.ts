@@ -1,6 +1,7 @@
 import type { Api, Context, Message, Model } from "@earendil-works/pi-ai";
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
+import { type RuntimeLogEntry, setRuntimeLogTap } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import { ContextBudgetError, ContextCacheTracker } from "./context-selection.js";
 import { createRuntimeContextPolicy } from "./runtime-context.js";
@@ -190,12 +191,13 @@ describe("runtime context policy", () => {
     expect(prepared.messages.at(-1)).toEqual(context.messages.at(-1));
   });
   it("creates navigation snapshots from originals with IDs and dates without inference", () => {
-    const { request, context } = fixture();
+    // ~190 tokens per message: 90 originals exceed the short-history allowance.
+    const { request, context } = fixture(90);
     const policy = createRuntimeContextPolicy({ ...request, contextStrategy: "snapshots" });
     const prepared = policy.prepareContext(context, model);
     const first = prepared.messages[0]!.content;
     expect(first).toContain("Historical navigation snapshots");
-    expect(first).toContain("message message-10 at 2026-01-01T00:00:00Z");
+    expect(first).toContain("message message-81 at 2026-01-01T00:00:00Z");
     expect(first).toContain("read_history");
     expect(prepared.messages.at(-1)).toEqual(context.messages.at(-1));
     expect(policy.getDecision()!.estimatedInputTokens).toBeLessThan(32768);
@@ -203,7 +205,7 @@ describe("runtime context policy", () => {
   it("uses fake-clock warmth from matching model requests, expiry only selects existing snapshots", () => {
     let now = 0;
     const tracker = new ContextCacheTracker(() => now);
-    const { request, context } = fixture(30);
+    const { request, context } = fixture(90);
     request.model.cacheCapabilities = { scope: "account", retentionMs: 300000, minimumTokens: 1 };
     const baseline = createRuntimeContextPolicy(
       { ...request, contextStrategy: "current" },
@@ -338,6 +340,46 @@ describe("runtime context policy", () => {
     expect(() => policy.prepareContext(context, { ...model, contextWindow: 16000 })).toThrow(
       ContextBudgetError,
     );
+  });
+  it("reports budget numbers in the error and the live runtime log without prompt text", () => {
+    const { request, context } = fixture(1);
+    context.messages[1] = {
+      role: "user",
+      timestamp: 1,
+      content: "secret-ish prompt ".repeat(2000),
+    };
+    const entries: RuntimeLogEntry[] = [];
+    setRuntimeLogTap((entry) => entries.push(entry));
+    let caught: unknown;
+    try {
+      createRuntimeContextPolicy({ ...request, contextStrategy: "retrieval" }).prepareContext(
+        context,
+        { ...model, contextWindow: 4096, maxTokens: 1024 },
+      );
+    } catch (error) {
+      caught = error;
+    } finally {
+      setRuntimeLogTap(undefined);
+    }
+    expect(caught).toBeInstanceOf(ContextBudgetError);
+    const details = (caught as ContextBudgetError).details();
+    expect(details).toMatchObject({ availableTokens: 3072, contextWindow: 4096, maxTokens: 1024 });
+    expect(details.requiredTokens).toBeGreaterThan(3072);
+    expect((caught as Error).message).toContain(
+      `required ~${details.requiredTokens} tokens, available 3072 (contextWindow 4096 - maxTokens 1024)`,
+    );
+    expect((caught as Error).message).toContain("raise its Context limit");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      code: "context.budget_exceeded",
+      level: "warn",
+      runId: "run",
+    });
+    expect(entries[0]?.summary).toContain(`requiredTokens=${details.requiredTokens}`);
+    expect(entries[0]?.summary).toContain("availableTokens=3072");
+    expect(entries[0]?.summary).toContain("contextWindow=4096");
+    expect(entries[0]?.summary).toContain("maxTokens=1024");
+    expect(JSON.stringify(entries)).not.toContain("secret-ish");
   });
   it("invalidates advisory warmth on resolved credential or provider account header rotation", () => {
     const tracker = new ContextCacheTracker(() => 1000);

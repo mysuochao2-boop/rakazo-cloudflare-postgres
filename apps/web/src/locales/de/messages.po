@@ -99,6 +99,10 @@ msgstr "{0}s Bildschirm"
 msgid "{amount} / {period}"
 msgstr ""
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "{botName} · Runtime logs"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "{botName}’s computer"
 msgstr "Computer von {botName}"
@@ -415,6 +419,10 @@ msgstr "Agents:"
 msgid "All bots"
 msgstr ""
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "All lanes"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr ""
@@ -519,6 +527,11 @@ msgstr "API-Schlüssel"
 #: src/pages/PluginsOverlay.tsx
 msgid "API key header"
 msgstr "API-Schlüssel-Header"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "API URL"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Appearance"
@@ -673,6 +686,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Back to sign in"
 msgstr "Zurück zur Anmeldung"
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Background"
+msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models"
@@ -948,6 +965,7 @@ msgid "Client secret"
 msgstr ""
 
 #: src/components/ErrorBoundary.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
@@ -1225,6 +1243,7 @@ msgid "Continue with email"
 msgstr "Mit E-Mail fortfahren"
 
 #: src/components/ComputersUnavailableHint.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Copied"
@@ -1238,6 +1257,10 @@ msgstr "Kopieren"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
+msgstr ""
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Copy run ID"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -1465,6 +1488,10 @@ msgstr "Modelleinstellungen konnten nicht geladen werden"
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "Ausführungsverlauf konnte nicht geladen werden"
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Could not load runtime logs."
+msgstr ""
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -2098,6 +2125,15 @@ msgstr "Gib eine ganze Zahl von 1 bis 1000 für das Bilderlimit ein."
 msgid "Enter an API key before testing."
 msgstr "Gib vor dem Test einen API-Schlüssel ein."
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation."
+msgstr "Gib das Kontextlimit des Modells in Token ein. „Modelle suchen“ kann es ausfüllen, sonst sieh in der Dokumentation des Modells nach."
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Errors only"
+msgstr ""
+
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Every"
@@ -2443,6 +2479,10 @@ msgstr ""
 msgid "Integrations"
 msgstr "Integrationen"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Interactive"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Interval"
@@ -2494,6 +2534,10 @@ msgstr ""
 msgid "Knowledge"
 msgstr "Wissen"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Lane"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Language"
 msgstr "Sprache"
@@ -2536,6 +2580,10 @@ msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Listening"
+msgstr ""
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Live"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -2589,6 +2637,7 @@ msgstr "Stimmanbieter werden geladen…"
 #: src/App.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/Auth.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/IntegrationSetup.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
@@ -3057,6 +3106,10 @@ msgstr ""
 msgid "No runs yet"
 msgstr ""
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "No runtime logs yet."
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "Noch keine Skills"
@@ -3415,6 +3468,10 @@ msgstr "OAuth erneut verbinden"
 msgid "Reconnecting"
 msgstr "Verbindung wird wiederhergestellt"
 
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Reconnecting…"
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Recording may have started, but the view could not refresh"
 msgstr ""
@@ -3604,6 +3661,11 @@ msgstr ""
 msgid "Replying to {0}"
 msgstr ""
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Required, e.g. 131072"
+msgstr "Erforderlich, z. B. 131072"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Research & writing"
 msgstr ""
@@ -3668,6 +3730,7 @@ msgid "Retry"
 msgstr "Erneut versuchen"
 
 #: src/App.tsx
+#: src/pages/BotRuntimeLogsDrawer.tsx
 #: src/pages/PeerMessagesOverlay.tsx
 msgid "Retry now"
 msgstr "Jetzt erneut versuchen"
@@ -3718,6 +3781,11 @@ msgstr "Routinen"
 msgid "Routines that run while you're away"
 msgstr ""
 
+#. placeholder {0}: runFilter.slice(-8)
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Run {0} ×"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Run at"
 msgstr ""
@@ -3748,6 +3816,14 @@ msgstr "Wird ausgeführt…"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Runs when this bot receives a verified message from this provider."
+msgstr ""
+
+#: src/pages/BotContextMenu.tsx
+msgid "Runtime logs"
+msgstr ""
+
+#: src/pages/BotRuntimeLogsDrawer.tsx
+msgid "Runtime logs are off."
 msgstr ""
 
 #: src/components/AskCard.tsx
@@ -4290,6 +4366,10 @@ msgstr "Der Anbieter drosselt die Anfragen."
 msgid "The selected memory provider is not available in this build."
 msgstr "Der ausgewählte Erinnerungsanbieter ist in diesem Build nicht verfügbar."
 
+#: src/lib/model-context-limit.ts
+msgid "The server reports {reported} tokens for this model."
+msgstr "Der Server meldet {reported} Token für dieses Modell."
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
 msgstr ""
@@ -4419,6 +4499,10 @@ msgstr "Toolquellen"
 #: src/pages/PluginsOverlay.tsx
 msgid "Tools"
 msgstr ""
+
+#: src/lib/model-context-limit.ts
+msgid "Total tokens the model accepts (input + output). Max output tokens are reserved from it, and the rest decides how much instructions, tools and chat history fit. Use the model's real limit, e.g. 1048576 for a 1M model."
+msgstr "Gesamtzahl der Token, die das Modell annimmt (Eingabe + Ausgabe). Davon werden die maximalen Ausgabe-Token reserviert; der Rest bestimmt, wie viel Anweisungen, Tools und Chatverlauf passen. Trage das echte Limit des Modells ein, z. B. 1048576 für ein 1M-Modell."
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"
