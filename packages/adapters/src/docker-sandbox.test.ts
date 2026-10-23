@@ -227,14 +227,18 @@ describe("Docker sandbox", () => {
     ).resolves.toEqual(new Uint8Array());
   });
 
-  it("exports files above the generic response cap using their listed size", async () => {
-    const fileSize = 13 * 1024 * 1024;
+  it("exports files up to the export cap using their listed size and skips larger files", async () => {
+    const fileSize = 8 * 1024 * 1024;
     const encodedLimit = Math.ceil(fileSize / 3) * 4 + 1024;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
+      if (url.pathname.endsWith("/workspace-archive")) {
+        return new Response("404 Not Found", { status: 404 });
+      }
       if (url.searchParams.get("mode") === "list") {
         return Response.json([
           { path: "large.bin", kind: "file", size: fileSize, executable: false },
+          { path: "huge.bin", kind: "file", size: fileSize + 1, executable: false },
         ]);
       }
       if (url.searchParams.get("mode") === "read") {
@@ -255,12 +259,100 @@ describe("Docker sandbox", () => {
       files.push(file);
     }
 
-    expect(files).toEqual([
-      { path: "large.bin", content: new Uint8Array(), executable: false },
-    ]);
+    expect(files).toEqual([{ path: "large.bin", content: new Uint8Array(), executable: false }]);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
       `http://supervisor.test/computers/computer/files?path=large.bin&mode=read&maxBytes=${fileSize}`,
     );
+    expect(fetchMock.mock.calls.map(([input]) => String(input)).join("\n")).not.toContain(
+      "path=huge.bin",
+    );
+  });
+
+  it("exports the workspace from one archive stream with excludes applied", async () => {
+    const tarFile = (name: string, content: string, mode = 0o644) => {
+      const header = Buffer.alloc(512);
+      header.write(name, 0, "utf8");
+      header.write(`${mode.toString(8).padStart(7, "0")}\0`, 100, "latin1");
+      header.write(`${content.length.toString(8).padStart(11, "0")}\0`, 124, "latin1");
+      header.write("0", 156, "latin1");
+      header.write("ustar\0", 257, "latin1");
+      header.fill(" ", 148, 156);
+      let sum = 0;
+      for (const byte of header) sum += byte;
+      header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, "latin1");
+      const body = Buffer.alloc(Math.ceil(content.length / 512) * 512);
+      body.write(content);
+      return Buffer.concat([header, body]);
+    };
+    const archive = Buffer.concat([
+      tarFile("./notes.md", "notes"),
+      tarFile("./bin/run.sh", "#!/bin/sh", 0o755),
+      tarFile("./.browser-profiles/chromium-bot-1/SingletonLock", "lock"),
+      Buffer.alloc(1024),
+      Buffer.from("RAKAZO_ARCHIVE_EXIT 0\n"),
+    ]);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/computers/computer/workspace-archive");
+      expect(url.searchParams.getAll("exclude")).toContain("**/node_modules");
+      return new Response(archive, {
+        headers: { "content-type": "application/x-tar", "x-rakazo-archive": "tar-v1" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new DockerSandboxProvider("http://supervisor.test", "test-token");
+    const files = [];
+    for await (const file of provider.exportWorkspace(
+      { id: "computer", botId: "bot", kind: "docker", providerRef: "computer" },
+      context,
+    )) {
+      files.push({ ...file, content: Buffer.from(file.content).toString("utf8") });
+    }
+    expect(files).toEqual([
+      { path: "notes.md", content: "notes" },
+      { path: "bin/run.sh", content: "#!/bin/sh", executable: true },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips excluded directories when falling back to the per-file walk", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/workspace-archive")) {
+        return new Response("404 Not Found", { status: 404 });
+      }
+      const listed = url.searchParams.get("path");
+      if (url.searchParams.get("mode") === "list" && listed === "") {
+        return Response.json([
+          { path: ".cache", kind: "dir", size: 0 },
+          { path: ".local", kind: "dir", size: 0 },
+          { path: "notes.md", kind: "file", size: 5 },
+        ]);
+      }
+      if (url.searchParams.get("mode") === "list" && listed === ".local") {
+        return Response.json([
+          { path: ".local/bin", kind: "dir", size: 0 },
+          { path: ".local/share", kind: "dir", size: 0 },
+        ]);
+      }
+      if (url.searchParams.get("mode") === "list" && listed === ".local/share") {
+        return Response.json([]);
+      }
+      if (url.searchParams.get("mode") === "read" && listed === "notes.md") {
+        return Response.json({ content: Buffer.from("notes").toString("base64") });
+      }
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new DockerSandboxProvider("http://supervisor.test", "test-token");
+    const files = [];
+    for await (const file of provider.exportWorkspace(
+      { id: "computer", botId: "bot", kind: "docker", providerRef: "computer" },
+      context,
+    )) {
+      files.push(file.path);
+    }
+    expect(files).toEqual(["notes.md"]);
   });
 
   it("releases this bot's screen assignment through the supervisor", async () => {

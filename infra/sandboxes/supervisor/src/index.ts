@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import http from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
+import { PassThrough, Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import {
@@ -39,9 +40,9 @@ import {
   hostComputerUser,
   legacyNetworkOwnedSolelyBy,
   publishedLoopbackControlHostPort,
+  resolveBotHomePath,
   resolveComputerControlEndpoint,
   resolveComputerEgressMode,
-  resolveBotHomePath,
   resolveSandboxHomeMode,
   resolveScreenNetworkMode,
   resolveScreenPublishTarget,
@@ -88,6 +89,8 @@ import {
   terminalCommand,
   toSandboxInput,
   withKeyedLock,
+  workspaceArchiveCommand,
+  workspaceArchiveOptions,
   workspaceTarget,
 } from "./supervisor-logic.js";
 
@@ -701,6 +704,70 @@ app.get("/computers/:id/files", async (c) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return c.json({ error: message }, 400);
+  }
+});
+
+/**
+ * One tar stream of the home for checkpoints (see workspaceArchiveCommand), instead of a
+ * `docker exec` per directory listing and per file read. Output is piped straight through,
+ * so the supervisor holds at most a few chunks regardless of home size.
+ */
+app.get("/computers/:id/workspace-archive", async (c) => {
+  let options: ReturnType<typeof workspaceArchiveOptions>;
+  try {
+    options = workspaceArchiveOptions({
+      exclude: c.req.queries("exclude") ?? [],
+      maxFileBytes: c.req.query("maxFileBytes"),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 400);
+  }
+  let container: Docker.Container;
+  try {
+    ({ container } = await managedContainer(
+      c.req.param("id"),
+      c.req.header("x-rakazo-bot-id"),
+      c.req.header("x-rakazo-space-id"),
+    ));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 404);
+  }
+  try {
+    const exec = await container.exec({
+      Cmd: workspaceArchiveCommand(options.excludes, options.maxFileBytes),
+      AttachStdout: true,
+      AttachStderr: true,
+      WorkingDir: "/home/rakazo",
+      Env: [
+        "HOME=/home/rakazo",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      ],
+    });
+    const raw = await exec.start({ hijack: true, stdin: false });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    stderr.resume();
+    docker.modem.demuxStream(raw, stdout, stderr);
+    raw.on("end", () => stdout.end());
+    raw.on("close", () => stdout.end());
+    raw.on("error", (error: Error) => stdout.destroy(error));
+    const abort = () => raw.destroy();
+    c.req.raw.signal.addEventListener("abort", abort, { once: true });
+    stdout.on("close", () => c.req.raw.signal.removeEventListener("abort", abort));
+    return new Response(Readable.toWeb(stdout) as ReadableStream<Uint8Array>, {
+      status: 200,
+      headers: {
+        "content-type": "application/x-tar",
+        "cache-control": "no-cache, no-transform",
+        "x-accel-buffering": "no",
+        "x-rakazo-archive": "tar-v1",
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, 500);
   }
 });
 

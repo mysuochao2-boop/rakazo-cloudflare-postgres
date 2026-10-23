@@ -259,6 +259,7 @@ import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safe
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import {
   DEFAULT_RUN_CHECKPOINT_TIMEOUT_MS,
+  interactiveCheckpointTimeoutMs as interactiveCheckpointTimeoutMsFromEnv,
   runCheckpointTimeoutMs,
   withDeadline,
 } from "./deadline.js";
@@ -474,18 +475,24 @@ export function createRunWorkspaceCheckpoint(
     markFiles(files: readonly unknown[]) {
       if (files.length > 0) dirty = true;
     },
-    async flush() {
+    /**
+     * `timeoutMs` overrides the run budget for one flush: interactive pauses (takeover,
+     * ask, approval, secret) use a short budget so a slow export never keeps the user
+     * waiting; a deferred checkpoint is picked up by the idle/sleep checkpoint.
+     */
+    async flush(flushOptions: { timeoutMs?: number } = {}) {
       if (!dirty) return false;
       dirty = false;
+      const budgetMs = flushOptions.timeoutMs ?? timeoutMs;
       try {
         const outcome = await withDeadline(
-          timeoutMs,
+          budgetMs,
           (signal) => checkpoint(signal),
           "workspace checkpoint timed out",
         );
         if (!outcome.ok) {
           // Deferred, not retried in this run: a retry would hit the same wall.
-          options.onTimeout?.(timeoutMs);
+          options.onTimeout?.(budgetMs);
           return false;
         }
         return true;
@@ -3836,6 +3843,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           screenRelease = { computer, context };
           scheduleComputerSleep(deps.jobs, storedComputer.id);
         }
+        const interactiveCheckpointTimeoutMs = interactiveCheckpointTimeoutMsFromEnv();
         const workspaceCheckpoint = createRunWorkspaceCheckpoint(
           (signal) =>
             computerAvailable
@@ -4649,7 +4657,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Another worker owns the run now; exit without leaving a local pause card.
               return pauseForApproval();
             }
-            await workspaceCheckpoint.flush();
+            await workspaceCheckpoint.flush({ timeoutMs: interactiveCheckpointTimeoutMs });
             const paused = await deps.events.pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,
@@ -6079,7 +6087,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!(await renewRunLease(deps, runId, workerId, fence))) {
               return pauseForSecret();
             }
-            await workspaceCheckpoint.flush();
+            await workspaceCheckpoint.flush({ timeoutMs: interactiveCheckpointTimeoutMs });
             const paused = await deps.events.pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,
@@ -6979,7 +6987,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 id: action.id,
                 label: redactSecrets(action.label, runSecrets),
               }));
-              await workspaceCheckpoint.flush();
+              await workspaceCheckpoint.flush({ timeoutMs: interactiveCheckpointTimeoutMs });
               const paused = await deps.events.pauseRunForInput({
                 spaceId: run.spaceId,
                 threadId: run.threadId,
@@ -7038,7 +7046,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               await publishMessage(deps, run, "bot", [
                 { kind: "computer", state: "Needs you", text: safeReason },
               ]);
-              await workspaceCheckpoint.flush();
+              await workspaceCheckpoint.flush({ timeoutMs: interactiveCheckpointTimeoutMs });
               if (!(await holdComputerExecutionLeaseForTakeover(deps.prisma, computerLease))) {
                 throw new Error("Computer lease expired before takeover");
               }

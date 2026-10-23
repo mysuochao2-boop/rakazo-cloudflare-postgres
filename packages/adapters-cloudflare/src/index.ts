@@ -8,7 +8,7 @@ export * from "./run-dispatcher.js";
 
 import type { AgentHomeStore, ArtifactStore } from "@rakazo/adapter-kit";
 import { R2ArtifactStore } from "./artifacts.js";
-import { R2AgentHomeStore } from "./home.js";
+import { R2AgentHomeStore, r2HomeStoreOptionsFromEnv } from "./home.js";
 import { objectStoreFromEnv } from "./object-store.js";
 
 export function cloudflareFileStoresFromEnv(
@@ -17,7 +17,7 @@ export function cloudflareFileStoresFromEnv(
   const selection = objectStoreFromEnv(env);
   if (!selection) return undefined;
   return {
-    home: new R2AgentHomeStore(selection.objects, selection.prefix),
+    home: new R2AgentHomeStore(selection.objects, selection.prefix, r2HomeStoreOptionsFromEnv(env)),
     artifacts: new R2ArtifactStore(selection.objects, selection.prefix),
   };
 }

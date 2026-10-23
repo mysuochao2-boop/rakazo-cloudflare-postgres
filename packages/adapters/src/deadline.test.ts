@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { runCheckpointTimeoutMs, transcriptWriteTimeoutMs, withDeadline } from "./deadline.js";
+import {
+  interactiveCheckpointTimeoutMs,
+  runCheckpointTimeoutMs,
+  transcriptWriteTimeoutMs,
+  withDeadline,
+} from "./deadline.js";
 
 describe("withDeadline", () => {
   it("returns the value when work finishes in time", async () => {
@@ -40,6 +45,10 @@ describe("withDeadline", () => {
     expect(runCheckpointTimeoutMs({})).toBe(120_000);
     expect(runCheckpointTimeoutMs({ RAKAZO_RUN_CHECKPOINT_TIMEOUT_MS: "5000" })).toBe(5_000);
     expect(runCheckpointTimeoutMs({ RAKAZO_RUN_CHECKPOINT_TIMEOUT_MS: "nope" })).toBe(120_000);
+    expect(interactiveCheckpointTimeoutMs({})).toBe(15_000);
+    expect(
+      interactiveCheckpointTimeoutMs({ RAKAZO_INTERACTIVE_CHECKPOINT_TIMEOUT_MS: "3000" }),
+    ).toBe(3_000);
     expect(transcriptWriteTimeoutMs({})).toBe(15_000);
   });
 });

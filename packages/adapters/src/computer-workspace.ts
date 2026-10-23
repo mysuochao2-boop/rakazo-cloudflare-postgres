@@ -15,6 +15,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { normalizeWorkspacePath, teamBotWorkspaceDirectory } from "./computer-support.js";
 import { LocalAgentHomeStore } from "./home.js";
+import { isExcludedWorkspacePath, workspaceExportExcludes } from "./workspace-export.js";
 
 export const PORTABLE_TRANSFER_BATCH_BYTES = 8 * 1024 * 1024;
 
@@ -284,8 +285,11 @@ export async function checkpointComputerWorkspace(
     return home.revise(homeKey);
   }
   const staging = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-"));
+  // Reinstallable toolchains/caches are never stored, whatever the provider streams back.
+  const excludes = workspaceExportExcludes();
   try {
     for await (const file of sandbox.exportWorkspace(computer, context)) {
+      if (isExcludedWorkspacePath(file.path, excludes)) continue;
       await writePortableFile(staging, file);
     }
     return await home.commit(homeKey, staging, context);

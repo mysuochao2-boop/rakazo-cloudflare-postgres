@@ -581,3 +581,90 @@ export function computerCommandEnv(layout: { display: string }) {
     "PIP_USER=1",
   ];
 }
+
+const WORKSPACE_ARCHIVE_PATTERN = /^(\*\*\/)?[A-Za-z0-9._@+-]+(\/[A-Za-z0-9._@+-]+)*$/;
+/** Default per-file cap for workspace archives; matches the adapter's export cap. */
+export const DEFAULT_WORKSPACE_ARCHIVE_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_WORKSPACE_ARCHIVE_FILE_BYTES = 256 * 1024 * 1024;
+const MAX_WORKSPACE_ARCHIVE_EXCLUDES = 128;
+
+/** Validates `?exclude=…&maxFileBytes=…` for GET /computers/:id/workspace-archive. */
+export function workspaceArchiveOptions(query: {
+  exclude: readonly string[];
+  maxFileBytes?: string;
+}): { excludes: string[]; maxFileBytes: number } {
+  if (query.exclude.length > MAX_WORKSPACE_ARCHIVE_EXCLUDES) throw new Error("too many excludes");
+  const excludes = query.exclude.map((pattern) => {
+    const trimmed = pattern.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+    const segments = trimmed.replace(/^\*\*\//, "").split("/");
+    if (
+      !WORKSPACE_ARCHIVE_PATTERN.test(trimmed) ||
+      segments.some((segment) => segment === "." || segment === "..")
+    ) {
+      throw new Error(`invalid exclude pattern: ${pattern.slice(0, 80)}`);
+    }
+    return trimmed;
+  });
+  const raw = query.maxFileBytes;
+  const maxFileBytes = raw === undefined ? DEFAULT_WORKSPACE_ARCHIVE_MAX_FILE_BYTES : Number(raw);
+  if (
+    !Number.isSafeInteger(maxFileBytes) ||
+    maxFileBytes < 0 ||
+    maxFileBytes > MAX_WORKSPACE_ARCHIVE_FILE_BYTES
+  ) {
+    throw new Error("invalid maxFileBytes");
+  }
+  return { excludes, maxFileBytes };
+}
+
+/** Browser profile caches `shouldSkipPortableWorkspaceFile` drops; pruned before tar reads them. */
+const BROWSER_PROFILE_CACHE_DIRECTORIES = [
+  "Cache",
+  "Code Cache",
+  "GPUCache",
+  "GrShaderCache",
+  "ShaderCache",
+  "DawnGraphiteCache",
+  "DawnWebGPUCache",
+  "Crashpad",
+];
+
+/**
+ * argv for a container command that writes one tar of /home/rakazo to stdout: regular files
+ * up to `maxFileBytes`, excluded directories pruned before they are walked, run at idle
+ * CPU/IO priority so a checkpoint does not stall the live desktop. After the archive it
+ * appends `RAKAZO_ARCHIVE_EXIT <tar status>` so the reader can tell a complete archive
+ * from one cut short. Patterns arrive as positional arguments, never as shell text.
+ */
+export function workspaceArchiveCommand(excludes: readonly string[], maxFileBytes: number) {
+  const script = [
+    "set -u",
+    'max="$1"; shift',
+    "prune=()",
+    'for pattern in "$@"; do',
+    '  case "$pattern" in',
+    '    "**/"*) prune+=(-name "${pattern#\\*\\*/}" -o) ;;',
+    '    *) prune+=(-path "./$pattern" -o) ;;',
+    "  esac",
+    "done",
+    "browser=()",
+    ...BROWSER_PROFILE_CACHE_DIRECTORIES.map(
+      (name) => `browser+=(-name ${shellQuoteWord(name)} -o)`,
+    ),
+    "low=()",
+    "command -v nice >/dev/null 2>&1 && low+=(nice -n 15)",
+    "command -v ionice >/dev/null 2>&1 && low+=(ionice -c 3)",
+    'cd "${RAKAZO_ARCHIVE_ROOT:-/home/rakazo}" || exit 2',
+    '"${low[@]}" find . \\( "${prune[@]}" \\( -path "./.browser-profiles/*" -type d \\( "${browser[@]}" -false \\) \\) \\) -prune -o -type f -size "-$((max + 1))c" -print0 2>/dev/null \\',
+    '  | "${low[@]}" tar --null --no-recursion --ignore-failed-read --hard-dereference --format=gnu -b 1 -cf - -T - 2>/dev/null',
+    // tar's status decides; `find` complaining about an unreadable directory does not.
+    'codes=("${PIPESTATUS[@]}")',
+    'status="${codes[1]:-2}"',
+    'printf "RAKAZO_ARCHIVE_EXIT %s\\n" "$status"',
+  ].join("\n");
+  return ["bash", "-c", script, "rakazo-archive", String(maxFileBytes), ...excludes];
+}
+
+function shellQuoteWord(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
