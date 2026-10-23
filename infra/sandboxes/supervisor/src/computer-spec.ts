@@ -478,6 +478,7 @@ const X11VNC_ARGS_PATTERN = /^[-a-zA-Z0-9_.: ]*$/;
 /**
  * Display env copied into new computers. The computer scripts re-validate both values,
  * so malformed settings only fall back to the defaults (1280x800, `-nowf -noxrecord`).
+ * `RAKAZO_X11VNC_ARGS=none` starts x11vnc without the default tuning flags.
  */
 export function computerDisplayEnv(env: NodeJS.ProcessEnv = process.env) {
   const values: string[] = [];
@@ -488,12 +489,13 @@ export function computerDisplayEnv(env: NodeJS.ProcessEnv = process.env) {
     }
     values.push(`RAKAZO_SCREEN_RESOLUTION=${resolution}`);
   }
-  const x11vncArgs = env.RAKAZO_X11VNC_ARGS;
-  if (x11vncArgs !== undefined) {
+  // Compose passes unset values as "", so empty keeps the defaults and `none` drops them.
+  const x11vncArgs = env.RAKAZO_X11VNC_ARGS?.trim();
+  if (x11vncArgs) {
     if (x11vncArgs.length > 256 || !X11VNC_ARGS_PATTERN.test(x11vncArgs)) {
       throw new Error("RAKAZO_X11VNC_ARGS may only contain flag words");
     }
-    values.push(`RAKAZO_X11VNC_ARGS=${x11vncArgs.trim()}`);
+    values.push(`RAKAZO_X11VNC_ARGS=${x11vncArgs === "none" ? "" : x11vncArgs}`);
   }
   return values;
 }

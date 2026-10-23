@@ -77,6 +77,13 @@ services:
       # Hybrid: public URL base for /screen/<port>/ via Nginx (Docker HostIp stays 127.0.0.1).
       PUBLIC_SCREEN_BASE: ${PUBLIC_SCREEN_BASE:-}
       SANDBOX_COMPUTER_EGRESS: ${SANDBOX_COMPUTER_EGRESS:-restricted}
+      # Display/observation tuning (empty = built-in defaults; see docs/computer-runtime.md).
+      RAKAZO_SCREEN_RESOLUTION: ${RAKAZO_SCREEN_RESOLUTION:-}
+      RAKAZO_X11VNC_ARGS: ${RAKAZO_X11VNC_ARGS:-}
+      RAKAZO_SCREEN_VNC_QUALITY: ${RAKAZO_SCREEN_VNC_QUALITY:-}
+      RAKAZO_SCREEN_VNC_COMPRESSION: ${RAKAZO_SCREEN_VNC_COMPRESSION:-}
+      RAKAZO_OBSERVE_FORMAT: ${RAKAZO_OBSERVE_FORMAT:-}
+      RAKAZO_OBSERVE_JPEG_QUALITY: ${RAKAZO_OBSERVE_JPEG_QUALITY:-}
       SANDBOX_IDLE_MS: ${SANDBOX_IDLE_MS:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:

@@ -69,6 +69,20 @@ The web service logs `screen.proxy.target_rejected`, `screen.proxy.http_failed`,
 
 When the screen shows a connection error, check whether `computer.screenUrl` succeeded in the API logs, then inspect web-service `screen.proxy.*` events around the same time. On `screen.proxy.target_rejected`, read `reason`: `invalid_path` is not a session path (API not contacted); `authority_rejected` is a non-OK API response (expired, revoked, or an API error); `invalid_authority_response` is an OK response with an invalid or malformed target body; `authority_unavailable` is a request, connectivity, or timeout failure. An upstream error or non-101 handshake points to the provider screen gateway. An upgraded connection that closes quickly points to a transport drop after the handshake. If the API issued a URL but no web-service event appears, inspect the browser Network panel and its WebSocket request. Do not paste the full capability URL into an issue or log.
 
+## Screen size and observation encoding
+
+The Docker supervisor reads these settings at startup and rejects malformed values. Display settings reach only computers created after the change, so existing computers keep their screen until they are recreated.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `RAKAZO_SCREEN_RESOLUTION` | `1280x800` | Xvfb size (`WIDTHxHEIGHT`) for the main and team screens. `1280x720` cuts pixels by 10% and fits 16:9 viewers. |
+| `RAKAZO_X11VNC_ARGS` | `-nowf -noxrecord` | Extra x11vnc flags (flag words only). `none` drops the defaults. |
+| `RAKAZO_SCREEN_VNC_QUALITY` / `RAKAZO_SCREEN_VNC_COMPRESSION` | noVNC defaults (6 / 2) | Tight JPEG quality and zlib level (0-9). The API copies them into the browser screen URL. |
+| `RAKAZO_OBSERVE_FORMAT` | `png` | `jpeg` sends `computer_observe` screenshots as JPEG. |
+| `RAKAZO_OBSERVE_JPEG_QUALITY` | `80` | JPEG quality (30-95) when `RAKAZO_OBSERVE_FORMAT=jpeg`. |
+
+The computer image validates the same display values before use. An older computer image ignores the JPEG request and keeps returning PNG with `mimeType: image/png`, so the supervisor and computer image can roll out in either order.
+
 ## E2B backend
 
 The E2B adapter uses `@e2b/desktop` for machine lifecycle, shell commands, files, and port URLs. Every bot desktop uses the shared Linux runtime, including the first bot. Its X display, screenshots, input, and view/control transports follow the same lifecycle as the other managed providers.

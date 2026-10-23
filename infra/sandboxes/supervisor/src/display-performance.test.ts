@@ -77,7 +77,10 @@ describe("computer display settings", () => {
     });
     expect(options.Env).toContain("RAKAZO_SCREEN_RESOLUTION=1280x720");
     expect(computerDisplayEnv({})).toEqual([]);
-    expect(computerDisplayEnv({ RAKAZO_X11VNC_ARGS: "" })).toEqual(["RAKAZO_X11VNC_ARGS="]);
+    expect(computerDisplayEnv({ RAKAZO_SCREEN_RESOLUTION: "", RAKAZO_X11VNC_ARGS: "" })).toEqual(
+      [],
+    );
+    expect(computerDisplayEnv({ RAKAZO_X11VNC_ARGS: "none" })).toEqual(["RAKAZO_X11VNC_ARGS="]);
   });
 
   it("rejects resolutions and x11vnc args that could break or inject into the scripts", () => {
