@@ -25,8 +25,14 @@ import {
   computerObservation,
   normalizeWorkspacePath,
 } from "./computer-support.js";
+import { shouldSkipPortableWorkspaceFile } from "./computer-workspace.js";
 import { sandboxCommandArgv } from "./sandbox-command-environment.js";
 import { readBodyCapped, withAbort } from "./web-ssrf.js";
+import {
+  isExcludedWorkspacePath,
+  readWorkspaceArchive,
+  workspaceExportExcludes,
+} from "./workspace-export.js";
 
 export const MAX_SANDBOX_ERROR_RESPONSE_BYTES = 8 * 1024;
 export const MAX_SANDBOX_SUCCESS_RESPONSE_BYTES = 16 * 1024 * 1024;
@@ -487,8 +493,40 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (!res.ok) throw new Error(`sandbox file write failed: ${res.status}`);
   }
 
+  /**
+   * Streams one tar of the home (reinstallable directories pruned in the container) when the
+   * supervisor supports it, and falls back to listing and reading file by file otherwise.
+   */
   async *exportWorkspace(computer: ComputerRef, context: AdapterContext) {
-    yield* this.walkWorkspace(computer, "", context);
+    const excludes = workspaceExportExcludes();
+    const keep = (file: PortableFile) =>
+      !isExcludedWorkspacePath(file.path, excludes) && !shouldSkipPortableWorkspaceFile(file.path);
+    const query = new URLSearchParams({ maxFileBytes: String(MAX_SANDBOX_EXPORT_FILE_BYTES) });
+    for (const pattern of excludes) query.append("exclude", pattern);
+    const res = await fetch(this.url(`/computers/${computer.id}/workspace-archive?${query}`), {
+      headers: this.headers(context, computer.botId),
+      signal: context.signal,
+    });
+    if (res.ok && res.headers.get("x-rakazo-archive") === "tar-v1" && res.body) {
+      for await (const file of readWorkspaceArchive(responseChunks(res.body, context.signal), {
+        maxFileBytes: MAX_SANDBOX_EXPORT_FILE_BYTES,
+      })) {
+        if (keep(file)) yield file;
+      }
+      return;
+    }
+    // Older supervisors answer the unknown route with Hono's plain-text 404.
+    const legacy =
+      (res.status === 404 || res.status === 405) &&
+      !res.headers.get("content-type")?.includes("application/json");
+    if (!legacy) {
+      const detail = await safeBody(res, context.signal);
+      throw new Error(`sandbox workspace archive failed: ${res.status} ${detail}`.trim());
+    }
+    cancelResponseBody(res);
+    for await (const file of this.walkWorkspace(computer, "", context, excludes)) {
+      if (keep(file)) yield file;
+    }
   }
 
   async importWorkspace(
@@ -558,12 +596,15 @@ export class DockerSandboxProvider implements SandboxProvider {
     computer: ComputerRef,
     directory: string,
     context: AdapterContext,
+    excludes: readonly string[],
   ): AsyncIterable<PortableFile> {
-    const entries = await this.listFiles(computer, directory, context);
+    const entries = (await this.listFiles(computer, directory, context)).filter(
+      (entry) => !isExcludedWorkspacePath(entry.path, excludes),
+    );
     for (let index = 0; index < entries.length; ) {
       const entry = entries[index]!;
       if (entry.kind === "dir") {
-        yield* this.walkWorkspace(computer, entry.path, context);
+        yield* this.walkWorkspace(computer, entry.path, context, excludes);
         index += 1;
         continue;
       }
@@ -586,6 +627,26 @@ export class DockerSandboxProvider implements SandboxProvider {
       );
       for (const file of batch) yield file;
     }
+  }
+}
+
+async function* responseChunks(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  const reader = body.getReader();
+  const onAbort = () => void reader.cancel(signal.reason).catch(() => undefined);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const next = await reader.read();
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    void reader.cancel().catch(() => undefined);
   }
 }
 

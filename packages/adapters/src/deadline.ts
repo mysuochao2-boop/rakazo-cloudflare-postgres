@@ -43,6 +43,20 @@ export function runCheckpointTimeoutMs(env: Record<string, string | undefined> =
   return positiveInt(env.RAKAZO_RUN_CHECKPOINT_TIMEOUT_MS, DEFAULT_RUN_CHECKPOINT_TIMEOUT_MS);
 }
 
+/**
+ * Checkpoint budget before an interactive pause (takeover, ask, approval, secret). Kept
+ * short so the user is not left waiting on an export; past it the idle checkpoint runs.
+ */
+export const DEFAULT_INTERACTIVE_CHECKPOINT_TIMEOUT_MS = 15_000;
+export function interactiveCheckpointTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+) {
+  return positiveInt(
+    env.RAKAZO_INTERACTIVE_CHECKPOINT_TIMEOUT_MS,
+    DEFAULT_INTERACTIVE_CHECKPOINT_TIMEOUT_MS,
+  );
+}
+
 /** Best-effort RunTranscript write budget. */
 export const DEFAULT_TRANSCRIPT_WRITE_TIMEOUT_MS = 15_000;
 export function transcriptWriteTimeoutMs(env: Record<string, string | undefined> = process.env) {

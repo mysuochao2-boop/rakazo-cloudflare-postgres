@@ -316,6 +316,18 @@ describe("run workspace checkpoint", () => {
     await expect(checkpoint.flush()).resolves.toBe(false);
     expect(persist).toHaveBeenCalledOnce();
   });
+
+  it("uses a shorter per-flush budget for interactive pauses", async () => {
+    const persist = vi.fn(() => new Promise<never>(() => undefined));
+    const onTimeout = vi.fn();
+    const checkpoint = createRunWorkspaceCheckpoint(persist, { timeoutMs: 60_000, onTimeout });
+    checkpoint.markDirty();
+    const started = Date.now();
+
+    await expect(checkpoint.flush({ timeoutMs: 20 })).resolves.toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(onTimeout).toHaveBeenCalledWith(20);
+  });
 });
 
 describe("run tool selection", () => {

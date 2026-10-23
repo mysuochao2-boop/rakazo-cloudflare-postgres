@@ -81,6 +81,32 @@ describe("provider-neutral computer workspace", () => {
       ),
     ).toBe("portable");
   });
+
+  it("does not store reinstallable toolchains and caches in a checkpoint", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-store-"));
+    roots.push(root);
+    const home = new LocalAgentHomeStore(root);
+    const provider = new FakeSandboxProvider();
+    const computer = await provider.provision({ botId: "bot-1", homePath: "/ignored" }, context);
+    for (const file of [
+      "notes/keep.txt",
+      ".local/bin/node",
+      ".cache/pip/wheel",
+      "project/node_modules/react/index.js",
+    ]) {
+      await provider.writeFile(
+        computer,
+        { path: file, content: new TextEncoder().encode(file) },
+        context,
+      );
+    }
+
+    await checkpointComputerWorkspace(home, provider, "bot-1", computer, context);
+    const stored = [];
+    for await (const file of home.exportHome("bot-1", context)) stored.push(file.path);
+
+    expect(stored).toEqual(["notes/keep.txt"]);
+  });
 });
 
 describe("Team run checkpoints", () => {
