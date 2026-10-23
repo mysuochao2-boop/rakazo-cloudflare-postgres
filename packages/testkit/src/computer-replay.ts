@@ -134,8 +134,7 @@ export async function runComputerReplay(
           if (name === "browser_act") return browserActFromTool(browser, computer, context, args);
           if (name === "computer_observe") {
             const observation = await sandbox.observe(computer, context);
-            assert.equal(observation.mimeType, "image/png");
-            assert.deepEqual([...observation.image.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+            assertObservationImage(observation);
             return observationToolResult(observation);
           }
           if (name === "read_file") {
@@ -199,4 +198,14 @@ export async function waitForReplayFile(
     }
   }
   throw new Error(`Browser did not create ${file}`);
+}
+
+/** Observations are PNG by default, or JPEG when the supervisor sets RAKAZO_OBSERVE_FORMAT=jpeg. */
+function assertObservationImage(observation: { mimeType: string; image: Uint8Array }) {
+  if (observation.mimeType === "image/jpeg") {
+    assert.deepEqual([...observation.image.slice(0, 3)], [0xff, 0xd8, 0xff]);
+    return;
+  }
+  assert.equal(observation.mimeType, "image/png");
+  assert.deepEqual([...observation.image.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 }

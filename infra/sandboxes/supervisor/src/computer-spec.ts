@@ -287,6 +287,8 @@ export interface ComputerCreateInput {
   controlToken?: string;
   networkMode?: string;
   publishControlPort?: boolean;
+  /** `KEY=value` display settings from {@link computerDisplayEnv}. */
+  displayEnv?: string[];
 }
 
 interface PointerInput {
@@ -316,6 +318,7 @@ export function containerCreateOptions(input: ComputerCreateInput) {
       "NPM_CONFIG_PREFIX=/home/rakazo/.local",
       "PIP_USER=1",
       ...(input.controlToken ? [`RAKAZO_COMPUTER_CONTROL_TOKEN=${input.controlToken}`] : []),
+      ...(input.displayEnv ?? []),
     ],
     Labels: {
       "rakazo.managed": "true",
@@ -393,7 +396,6 @@ export function legacyNetworkOwnedSolelyBy(
   return attachedBotIds.every((owner) => owner === botId);
 }
 
-
 /** How the supervisor maps a client homePath onto DATA_DIR/homes/<botId>. */
 export type SandboxHomeMode = "strict" | "local-key";
 
@@ -445,12 +447,57 @@ export function resolvePublicScreenBase(
   }
 }
 
-export function screenUrlFor(hostPort: string, host = SCREEN_HOST) {
+export function screenUrlFor(hostPort: string, host = SCREEN_HOST, env = process.env) {
   const publicBase = resolvePublicScreenBase();
-  if (publicBase) {
-    return `${publicBase}/screen/${hostPort}/embed.html`;
+  const base = publicBase
+    ? `${publicBase}/screen/${hostPort}/embed.html`
+    : `http://${host}:${hostPort}/embed.html`;
+  const search = screenEncodingSearch(env);
+  return search ? `${base}?${search}` : base;
+}
+
+/**
+ * noVNC Tight levels (`RAKAZO_SCREEN_VNC_QUALITY`, `RAKAZO_SCREEN_VNC_COMPRESSION`, 0-9).
+ * The API copies them into the browser capability URL; unset keeps noVNC defaults.
+ */
+export function screenEncodingSearch(env: NodeJS.ProcessEnv = process.env) {
+  const params = new URLSearchParams();
+  for (const [name, key] of [
+    ["quality", "RAKAZO_SCREEN_VNC_QUALITY"],
+    ["compression", "RAKAZO_SCREEN_VNC_COMPRESSION"],
+  ] as const) {
+    const value = env[key]?.trim();
+    if (value && /^[0-9]$/.test(value)) params.set(name, value);
   }
-  return `http://${host}:${hostPort}/embed.html`;
+  return params.toString();
+}
+
+const SCREEN_RESOLUTION_PATTERN = /^[1-9][0-9]{2,3}x[1-9][0-9]{2,3}$/;
+const X11VNC_ARGS_PATTERN = /^[-a-zA-Z0-9_.: ]*$/;
+
+/**
+ * Display env copied into new computers. The computer scripts re-validate both values,
+ * so malformed settings only fall back to the defaults (1280x800, `-nowf -noxrecord`).
+ * `RAKAZO_X11VNC_ARGS=none` starts x11vnc without the default tuning flags.
+ */
+export function computerDisplayEnv(env: NodeJS.ProcessEnv = process.env) {
+  const values: string[] = [];
+  const resolution = env.RAKAZO_SCREEN_RESOLUTION?.trim();
+  if (resolution) {
+    if (!SCREEN_RESOLUTION_PATTERN.test(resolution)) {
+      throw new Error("RAKAZO_SCREEN_RESOLUTION must look like 1280x720");
+    }
+    values.push(`RAKAZO_SCREEN_RESOLUTION=${resolution}`);
+  }
+  // Compose passes unset values as "", so empty keeps the defaults and `none` drops them.
+  const x11vncArgs = env.RAKAZO_X11VNC_ARGS?.trim();
+  if (x11vncArgs) {
+    if (x11vncArgs.length > 256 || !X11VNC_ARGS_PATTERN.test(x11vncArgs)) {
+      throw new Error("RAKAZO_X11VNC_ARGS may only contain flag words");
+    }
+    values.push(`RAKAZO_X11VNC_ARGS=${x11vncArgs === "none" ? "" : x11vncArgs}`);
+  }
+  return values;
 }
 
 export function screenUrlWithToken(screenUrl: string, token: string) {

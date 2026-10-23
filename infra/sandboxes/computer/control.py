@@ -344,7 +344,35 @@ def execute_command(body):
     }
 
 
-def capture(display):
+def observation_format(body):
+    """Requested screenshot encoding; anything unexpected keeps lossless PNG."""
+    image_format = body.get("imageFormat", "png")
+    if image_format != "jpeg":
+        return ("png", None)
+    quality = body.get("jpegQuality", 80)
+    if not isinstance(quality, int) or isinstance(quality, bool) or not 30 <= quality <= 95:
+        quality = 80
+    return ("jpeg", quality)
+
+
+def encode_jpeg(png, quality, env):
+    """Re-encode a PNG frame as baseline JPEG; None keeps the PNG on any failure."""
+    try:
+        converted = subprocess.run(
+            ["convert", "png:-", "-strip", "-quality", str(quality), "-sampling-factor", "4:2:0", "jpeg:-"],
+            input=png,
+            env=env,
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if converted.returncode or converted.stdout[:2] != b"\xff\xd8":
+        return None
+    return converted.stdout
+
+
+def capture(display, image_format=("png", None)):
     env = {**os.environ, "DISPLAY": display}
 
     def output(argv, fallback=""):
@@ -374,9 +402,14 @@ def capture(display):
     if image.returncode:
         raise RuntimeError(image.stderr.decode("utf-8", "replace") or "screen capture failed")
     fields = dict(line.split("=", 1) for line in cursor.splitlines() if "=" in line)
+    encoded, mime_type = image.stdout, "image/png"
+    if image_format[0] == "jpeg":
+        jpeg = encode_jpeg(image.stdout, image_format[1], env)
+        if jpeg is not None:
+            encoded, mime_type = jpeg, "image/jpeg"
     return {
-        "image": base64.b64encode(image.stdout).decode("ascii"),
-        "mimeType": "image/png",
+        "image": base64.b64encode(encoded).decode("ascii"),
+        "mimeType": mime_type,
         "width": width,
         "height": height,
         **({"cursor": {"x": int(fields["X"]), "y": int(fields["Y"])}} if "X" in fields and "Y" in fields else {}),
@@ -434,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(settle_ms / 1000)
                 response = {"completed": len(body.get("steps", []))}
                 if body.get("observe", True):
-                    response["observation"] = capture(display)
+                    response["observation"] = capture(display, observation_format(body))
             encoded = json.dumps(response, separators=(",", ":")).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

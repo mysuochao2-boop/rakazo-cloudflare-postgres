@@ -27,6 +27,7 @@ import {
   COMPUTER_UID,
   COMPUTER_USER,
   computerBridgeNameFor,
+  computerDisplayEnv,
   computerHomeStorage,
   computerNetworkCreateOptions,
   computerNetworkNameFor,
@@ -74,6 +75,9 @@ import {
   isComputerControlUnavailable,
   nextScreenIndex,
   normalizeWorkspaceRelative,
+  observationCaptureShell,
+  observationImageOptions,
+  observationRequestFields,
   parseObservation,
   preferComputerControl,
   quiesceBrowserProfilesCommand,
@@ -112,6 +116,9 @@ const teamScreenLimit = resolveTeamScreenLimit();
 // Host-run supervisors on Docker Desktop (macOS/Windows) cannot reach container
 // IPs, so computer control must use a published loopback port instead.
 const controlViaLoopback = process.env.SANDBOX_CONTROL_VIA_LOOPBACK === "true";
+// Fail fast on malformed display/observation settings instead of creating broken computers.
+const COMPUTER_DISPLAY_ENV = computerDisplayEnv();
+const OBSERVATION_IMAGE = observationImageOptions();
 const computerScreens = new Map<string, Map<string, ScreenAssignment>>();
 
 export const MAX_SUPERVISOR_REQUEST_BYTES = 1024 * 1024;
@@ -320,6 +327,7 @@ app.post("/computers", async (c) => {
               networkMode,
               controlToken: randomUUID(),
               publishControlPort: controlViaLoopback,
+              displayEnv: COMPUTER_DISPLAY_ENV,
             }),
           );
           await container.start();
@@ -1349,6 +1357,7 @@ export async function controlDesktop(
         display,
         observe,
         settleMs,
+        ...observationRequestFields(OBSERVATION_IMAGE),
       }),
       signal,
     });
@@ -1915,8 +1924,7 @@ async function observeContainer(container: Docker.Container, display = ":1") {
     'wid="$(xdotool getactivewindow 2>/dev/null || true)"',
     'printf "WINDOW %s\\n" "$wid"',
     'printf "TITLE %s\\n" "$(test -n "$wid" && xdotool getwindowname "$wid" 2>/dev/null || true)"',
-    'printf "IMAGE "',
-    "import -window root png:- 2>/dev/null | base64 -w0",
+    ...observationCaptureShell(OBSERVATION_IMAGE),
     'printf "\\n"',
   ].join("; ");
   const result = await runContainerCommand(container, ["bash", "-lc", command]);

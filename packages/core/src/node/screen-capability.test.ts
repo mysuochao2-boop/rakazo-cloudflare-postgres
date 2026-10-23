@@ -278,3 +278,29 @@ describe("remote screen capability reuse", () => {
     expect(issued(1_000_000, scope, local)).not.toBe(issued(1_000_001, scope, local));
   });
 });
+
+describe("screen capability noVNC encoding levels", () => {
+  it("copies single-digit quality/compression into the browser URL only", () => {
+    const sealed = new URL(
+      sealScreenCapability(
+        "https://computer.example/screen/1/embed.html?view_only=true&quality=5&compression=12",
+        "fake-secret",
+        "https://app.example",
+        scope,
+        100,
+      ),
+    );
+    expect(sealed.searchParams.get("quality")).toBe("5");
+    expect(sealed.searchParams.has("compression")).toBe(false);
+    const plain = new URL(
+      sealScreenCapability(
+        "https://computer.example/screen/1/embed.html?view_only=true",
+        "fake-secret",
+        "https://app.example",
+        scope,
+        100,
+      ),
+    );
+    expect(plain.searchParams.has("quality")).toBe(false);
+  });
+});

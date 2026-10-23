@@ -132,6 +132,11 @@
         return value === "1" || value === "true" || value === "yes";
       }
 
+      function level(name) {
+        const value = String(query(name, ""));
+        return /^[0-9]$/.test(value) ? Number(value) : undefined;
+      }
+
       const path = String(query("path", "websockify")).replace(/^\//, "");
       const prefix = window.location.pathname.replace(/[^/]+$/, "");
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -140,6 +145,12 @@
       rfb.viewOnly = flag("view_only");
       rfb.scaleViewport = true;
       rfb.clipViewport = false;
+      // Optional Tight encoding knobs (0-9); noVNC keeps its defaults (quality 6, compression 2)
+      // when the capability URL omits them.
+      const qualityLevel = level("quality");
+      if (qualityLevel !== undefined) rfb.qualityLevel = qualityLevel;
+      const compressionLevel = level("compression");
+      if (compressionLevel !== undefined) rfb.compressionLevel = compressionLevel;
       attachRemoteClipboardCopy(rfb);
       if (!rfb.viewOnly) attachHostClipboardPaste(rfb);
       if (!rfb.viewOnly && (isTouchBrowser() || window.__rakazoNativeKeys)) {
