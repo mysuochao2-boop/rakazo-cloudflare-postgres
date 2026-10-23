@@ -788,4 +788,14 @@ export const RU_MESSAGES: Record<string, string> = {
   "Sign in to your existing account to link SSO":
     "Войдите в существующий аккаунт, чтобы привязать SSO",
   "SSO is temporarily unavailable. Try again.": "SSO временно недоступен. Попробуйте снова.",
+  "Total tokens the model accepts (input + output). Max output tokens are reserved from it, and the rest decides how much instructions, tools and chat history fit. Use the model's real limit, e.g. 1048576 for a 1M model.":
+    "Сколько токенов модель принимает всего (вход + выход). Из этого резервируется максимум выходных токенов, а остаток определяет, сколько инструкций, инструментов и истории чата поместится. Укажите реальный лимит модели, например 1048576 для модели на 1M.",
+  "The server reports {reported} tokens for this model.":
+    "Сервер сообщает {reported} токенов для этой модели.",
+  "Required, e.g. 131072": "Обязательно, например 131072",
+  "Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation.":
+    "Укажите лимит контекста модели в токенах. «Найти модели» может заполнить его автоматически, иначе посмотрите документацию модели.",
+  "API URL": "URL API",
+  "API URL (optional)": "URL API (необязательно)",
+  "https://api.example.com": "https://api.example.com",
 };

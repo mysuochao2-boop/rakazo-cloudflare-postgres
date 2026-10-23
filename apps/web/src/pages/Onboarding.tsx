@@ -2,7 +2,6 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
   CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
   cloudflareGatewayRouting,
-  DEFAULT_MODEL_CONTEXT_WINDOW,
   DEFAULT_MODEL_MAX_TOKENS,
   type IntegrationSetupState,
   MAX_MODEL_CONTEXT_WINDOW,
@@ -16,11 +15,13 @@ import {
   type ThinkingLevel,
 } from "@rakazo/contracts";
 import {
+  applyProbedContextWindow,
   COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
   createModelProbe,
   initialModelProbeState,
   pickCatalogModelId,
+  probedContextWindow,
 } from "@rakazo/core";
 import {
   Button,
@@ -51,6 +52,7 @@ import {
   runModelConnectionPreflight,
   unavailableSelectedModel,
 } from "../lib/model-connection-preflight";
+import { contextLimitHint } from "../lib/model-context-limit";
 import { rpc } from "../lib/rpc";
 import { useModelOAuthSignIn } from "../lib/use-model-oauth-signin";
 import { errorText } from "../lib/user-error";
@@ -143,10 +145,21 @@ export function OnboardingPage() {
   const [manualModelId, setManualModelId] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
   const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
-  const [contextWindow, setContextWindow] = useState(String(DEFAULT_MODEL_CONTEXT_WINDOW));
+  // New connections start empty: the user (or /models) supplies the model's real window.
+  const [contextWindow, setContextWindowState] = useState("");
+  const contextWindowRef = useRef(contextWindow);
+  contextWindowRef.current = contextWindow;
+  /** Last value written by a /models probe, so a later probe may replace it. */
+  const probedContextWindowFillRef = useRef<string | null>(null);
+  const setContextWindow = (value: string) => {
+    probedContextWindowFillRef.current = null;
+    contextWindowRef.current = value;
+    setContextWindowState(value);
+  };
   const [supportsImages, setSupportsImages] = useState(false);
   const [maxImagesPerPrompt, setMaxImagesPerPrompt] = useState("");
-  const [{ models: probeModels, probing }, setProbe] = useState(initialModelProbeState);
+  const [{ models: probeModels, contextWindows: probeContextWindows, probing }, setProbe] =
+    useState(initialModelProbeState);
   const [modelProbe] = useState(() => createModelProbe(setProbe));
   const resetOpenAiCompatibleProbe = modelProbe.reset;
   const createStartedRef = useRef(false);
@@ -327,12 +340,27 @@ export function OnboardingPage() {
     setManualModelId(false);
     setSupportsImages(false);
     setMaxTokens(String(DEFAULT_MODEL_MAX_TOKENS));
-    setContextWindow(String(DEFAULT_MODEL_CONTEXT_WINDOW));
+    setContextWindow("");
     setMaxImagesPerPrompt("");
     resetOpenAiCompatibleProbe();
     invalidatePreflight();
     setError(null);
     setNotice(null);
+  }
+
+  function fillProbedContextWindow(
+    nextModelId: string,
+    windows: Record<string, number> = probeContextWindows,
+  ) {
+    const next = applyProbedContextWindow({
+      current: contextWindowRef.current,
+      autoFilled: probedContextWindowFillRef.current,
+      probed: probedContextWindow(windows, nextModelId),
+    });
+    if (next.value === contextWindowRef.current) return;
+    contextWindowRef.current = next.value;
+    setContextWindowState(next.value);
+    probedContextWindowFillRef.current = next.autoFilled;
   }
 
   function preflightStillCurrent(revision: number): boolean {
@@ -351,7 +379,7 @@ export function OnboardingPage() {
       baseUrl,
       apiKey,
       request: rpc.models.probeOpenAiCompatible,
-      onSuccess: (models) => {
+      onSuccess: (models, contextWindows) => {
         if (!preflightStillCurrent(revision)) return;
         const trimmed = modelIdRef.current.trim();
         const next = trimmed || models[0] || "";
@@ -362,6 +390,7 @@ export function OnboardingPage() {
           (wasManual) => wasManual || (Boolean(trimmed) && !models.includes(trimmed)),
         );
         setModelId(next);
+        fillProbedContextWindow(next, contextWindows);
         const unavailable = unavailableSelectedModel(trimmed, models);
         if (unavailable) {
           setPreflightFailure(unavailable);
@@ -463,6 +492,12 @@ export function OnboardingPage() {
         if (parsedMaxTokens === undefined) {
           setError(
             t`Enter a whole number from 1 to ${MAX_MODEL_MAX_TOKENS} for maximum output tokens.`,
+          );
+          return;
+        }
+        if (!contextWindow.trim()) {
+          setError(
+            t`Enter the model's context limit in tokens. Find models may fill it in, otherwise check the model's documentation.`,
           );
           return;
         }
@@ -635,6 +670,7 @@ export function OnboardingPage() {
                           } else {
                             setManualModelId(false);
                             setModelId(next);
+                            fillProbedContextWindow(next);
                           }
                         }}
                         items={probeModelItems}
@@ -674,6 +710,7 @@ export function OnboardingPage() {
                         onClick={() => {
                           setManualModelId(false);
                           setModelId(probeModels[0] ?? "");
+                          fillProbedContextWindow(probeModels[0] ?? "");
                           invalidatePreflight();
                         }}
                       >
@@ -709,6 +746,12 @@ export function OnboardingPage() {
                     contextWindow={contextWindow}
                     onContextWindowChange={setContextWindow}
                     contextWindowLabel={t`Context limit`}
+                    contextWindowRequired
+                    contextWindowPlaceholder={t`Required, e.g. 131072`}
+                    contextWindowHint={contextLimitHint(
+                      probedContextWindow(probeContextWindows, modelId),
+                      contextWindow,
+                    )}
                     supportsImages={supportsImages}
                     onSupportsImagesChange={setSupportsImages}
                     imagesLabel={t`Supports images`}

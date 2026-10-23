@@ -90,7 +90,7 @@ import {
   prepareManagedConnectorForTransaction,
   prepareStoredModelAuth,
   probeCatalogProviderModels,
-  probeOpenAiCompatibleModels,
+  probeOpenAiCompatibleModelList,
   provisionComputer,
   queueComputerUpdate,
   releaseComputerExecutionLease,
@@ -1254,8 +1254,12 @@ export function createRouter(deps: RouterDeps) {
       probeOpenAiCompatible: authed.models.probeOpenAiCompatible.handler(
         async ({ context, input }) => {
           try {
-            const models = await probeOpenAiCompatibleModels(input, undefined, context.signal);
-            return { models };
+            const { models, contextWindows } = await probeOpenAiCompatibleModelList(
+              input,
+              undefined,
+              context.signal,
+            );
+            return { models, contextWindows };
           } catch (error) {
             throw new ORPCError("BAD_REQUEST", {
               message: error instanceof Error ? error.message : "Could not list models",

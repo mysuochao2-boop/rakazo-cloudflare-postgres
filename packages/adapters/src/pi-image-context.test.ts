@@ -168,12 +168,12 @@ describe("Pi image context planning", () => {
     expect(estimatePiImageTokens(malformed)).toBeUndefined();
     expect(
       estimateContextTokens([{ role: "user", content: [malformed] }], estimatePiImageTokens),
-    ).toBeGreaterThan(300_000);
+    ).toBeGreaterThan(100_000);
     const call = {
       role: "assistant",
       content: [{ type: "toolCall", id: "call", name: "upload", arguments: malformed }],
     };
-    expect(estimateContextTokens(call, estimatePiImageTokens)).toBeGreaterThan(300_000);
+    expect(estimateContextTokens(call, estimatePiImageTokens)).toBeGreaterThan(100_000);
   });
 
   it("makes implausibly large declared dimensions exceed any configured context window", async () => {

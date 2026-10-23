@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentRunRequest, AgentRuntimeEvent, ConnectorTool } from "@rakazo/adapter-kit";
-import { PiAgentRuntime } from "@rakazo/adapters";
+import { estimateTextTokens, PiAgentRuntime } from "@rakazo/adapters";
 import { afterEach, describe, expect, it } from "vitest";
 import { type ModelEmulatorRequest, startModelEmulator } from "./model-emulator.js";
 
@@ -55,7 +55,7 @@ describe("real Pi against an offline model HTTP endpoint", () => {
     async (contextStrategy) => {
       const decisions: Array<{ droppedMessages: number; truncatedToolResults: number }> = [];
       const assertBounded = (request: ModelEmulatorRequest) => {
-        expect(Buffer.byteLength(JSON.stringify(request.messages))).toBeLessThan(7168);
+        expect(estimateTextTokens(JSON.stringify(request.messages))).toBeLessThan(7168);
         expect(JSON.stringify(request.messages)).toContain("Save hello to notes.txt.");
       };
       const server = await startModelEmulator({
@@ -233,7 +233,9 @@ describe("real Pi against an offline model HTTP endpoint", () => {
         ),
         events,
       ),
-    ).rejects.toThrow("Required context exceeds the model context budget");
+    ).rejects.toThrow(
+      /Required context exceeds the model context budget: required ~\d+ tokens, available 3072 \(contextWindow 4096 - maxTokens 1024\)\. If the model supports a larger window, raise its Context limit/,
+    );
     server.assertComplete();
     expect(reservations).toBe(0);
     expect(events.filter((event) => event.type === "usage")).toHaveLength(0);
@@ -269,7 +271,7 @@ describe("real Pi against an offline model HTTP endpoint", () => {
         },
         {
           expect(request) {
-            expect(Buffer.byteLength(JSON.stringify(request.messages))).toBeLessThan(7168);
+            expect(estimateTextTokens(JSON.stringify(request.messages))).toBeLessThan(7168);
             expect(latestToolResult(request)?.tool_call_id).toBe("child-write");
             expect(String(latestToolResult(request)?.content)).toContain("truncated");
             expect(JSON.stringify(request.messages)).toContain("Save hello to notes.txt.");

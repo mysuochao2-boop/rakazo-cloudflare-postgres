@@ -2,8 +2,11 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Api, Context, Message, Model } from "@earendil-works/pi-ai";
 import type { AdapterContext, AgentRunRequest, AgentUsage } from "@rakazo/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
+import { emitRuntimeLog, summarizeAgentLogFields } from "@rakazo/core";
+import { getLogger } from "@rakazo/logging";
 import type { CacheRequest, ContextBudget } from "./context-selection.js";
 import {
+  ContextBudgetError,
   ContextCacheTracker,
   estimateContextTokens,
   providerContextPrefix,
@@ -48,6 +51,33 @@ export interface RuntimeContextDecision {
   truncatedToolResults: number;
   observedReuse: boolean | null;
 }
+/** Token counts only (never prompt text, model ids, URLs or keys). */
+function reportContextBudgetExceeded(
+  request: AgentRunRequest,
+  error: ContextBudgetError,
+  fixedTokens: number,
+): void {
+  const fields = {
+    runId: request.runId,
+    lane: request.lane ?? "interactive",
+    ...error.details(),
+    fixedTokens,
+  };
+  try {
+    getLogger().warn("context.budget_exceeded", fields);
+  } catch {
+    // Logging must never mask the budget error.
+  }
+  emitRuntimeLog({
+    code: "context.budget_exceeded",
+    level: "warn",
+    runId: request.runId ?? null,
+    lane: fields.lane,
+    ms: null,
+    summary: summarizeAgentLogFields(fields),
+  });
+}
+
 /** Applies one shared free context policy immediately before every model call.
  * Original history is untrusted evidence. Only in-memory hashes track cache timing.
  */
@@ -373,13 +403,19 @@ export function createRuntimeContextPolicy(
           ],
         };
       });
-      const selected = selectContext(messages, {
-        budget,
-        strategy,
-        protectedIndexes,
-        cacheWarmth: predictedCache,
-        recentExchanges: retainShortHistory || standaloneHistoryFallback ? messages.length : 8,
-      });
+      let selected: ReturnType<typeof selectContext<(typeof messages)[number]>>;
+      try {
+        selected = selectContext(messages, {
+          budget,
+          strategy,
+          protectedIndexes,
+          cacheWarmth: predictedCache,
+          recentExchanges: retainShortHistory || standaloneHistoryFallback ? messages.length : 8,
+        });
+      } catch (error) {
+        if (error instanceof ContextBudgetError) reportContextBudgetExceeded(request, error, fixed);
+        throw error;
+      }
       const shortenedStructuredResults = selected.messages.filter((message) => {
         if (message.role !== "toolResult") return false;
         try {

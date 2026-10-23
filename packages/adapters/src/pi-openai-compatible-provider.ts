@@ -353,19 +353,68 @@ export function prepareOpenAiCompatibleConnect(input: OpenAiCompatibleConnectInp
   return apiKey ? { baseUrl: normalized, modelId, apiKey } : { baseUrl: normalized, modelId };
 }
 
+type OpenAiCompatibleModelEntry = {
+  id?: string;
+  context_length?: unknown;
+  context_window?: unknown;
+  contextWindow?: unknown;
+  max_model_len?: unknown;
+  max_context_length?: unknown;
+  top_provider?: { context_length?: unknown } | null;
+};
+
 export type OpenAiCompatibleModelsResponse = {
   object?: string;
-  data?: Array<{ id?: string }>;
-  models?: Array<{ id?: string }>;
+  data?: Array<OpenAiCompatibleModelEntry>;
+  models?: Array<OpenAiCompatibleModelEntry>;
 };
+
+/** `/models` ids plus any context lengths the server advertised (OpenRouter, vLLM, LM Studio, ...). */
+export type OpenAiCompatibleModelsProbe = {
+  models: string[];
+  /** Model id -> advertised context window in tokens. Absent ids advertised nothing usable. */
+  contextWindows: Record<string, number>;
+};
+
+/** Highest plausible window we accept from a probe; mirrors MAX_MODEL_CONTEXT_WINDOW. */
+const MAX_PROBED_CONTEXT_WINDOW = 2_147_483_647;
+/** Below this the value is almost certainly not a context window (or useless for agents). */
+const MIN_PROBED_CONTEXT_WINDOW = 1_024;
+
+function probedContextWindow(entry: OpenAiCompatibleModelEntry): number | undefined {
+  const candidates = [
+    entry.context_length,
+    entry.context_window,
+    entry.contextWindow,
+    entry.max_model_len,
+    entry.max_context_length,
+    entry.top_provider?.context_length,
+  ];
+  for (const candidate of candidates) {
+    const value =
+      typeof candidate === "number"
+        ? candidate
+        : typeof candidate === "string" && /^\d+$/.test(candidate.trim())
+          ? Number(candidate.trim())
+          : Number.NaN;
+    if (
+      Number.isSafeInteger(value) &&
+      value >= MIN_PROBED_CONTEXT_WINDOW &&
+      value <= MAX_PROBED_CONTEXT_WINDOW
+    ) {
+      return value;
+    }
+  }
+  return undefined;
+}
 
 /** Shared suffix: /models probe is optional when the user already knows a model id. */
 const OPENAI_COMPAT_PROBE_HAND_FILL_HINT = "You can still Connect with an explicit model id.";
 
-function probeModelIds(
+function probeModelList(
   body: OpenAiCompatibleModelsResponse,
   opts?: { catalogProbe?: boolean },
-): string[] {
+): OpenAiCompatibleModelsProbe {
   const { maxModelIds } = modelsProbeLimits(opts?.catalogProbe);
   const entries = Array.isArray(body.data)
     ? body.data
@@ -378,6 +427,7 @@ function probeModelIds(
     );
   }
   const ids: string[] = [];
+  const contextWindows: Record<string, number> = {};
   for (const entry of entries) {
     const id = typeof entry?.id === "string" ? entry.id.trim() : "";
     if (!id) continue;
@@ -385,8 +435,12 @@ function probeModelIds(
       throw new Error("Model server returned too many or overly long model ids");
     }
     ids.push(id);
+    const contextWindow = probedContextWindow(entry);
+    if (contextWindow !== undefined && !Object.hasOwn(contextWindows, id)) {
+      contextWindows[id] = contextWindow;
+    }
   }
-  return ids;
+  return { models: ids, contextWindows };
 }
 
 async function readBoundedJson(
@@ -432,6 +486,16 @@ export async function probeOpenAiCompatibleModels(
   signal?: AbortSignal,
   opts?: { allowPublic?: boolean; catalogProbe?: boolean },
 ): Promise<string[]> {
+  return (await probeOpenAiCompatibleModelList(input, fetchImpl, signal, opts)).models;
+}
+
+/** Same probe as `probeOpenAiCompatibleModels`, keeping advertised context windows. */
+export async function probeOpenAiCompatibleModelList(
+  input: { baseUrl: string; apiKey?: string },
+  fetchImpl?: typeof fetch,
+  signal?: AbortSignal,
+  opts?: { allowPublic?: boolean; catalogProbe?: boolean },
+): Promise<OpenAiCompatibleModelsProbe> {
   const baseUrl = assertAllowedOpenAiCompatibleUrl(input.baseUrl, {
     allowPublic: opts?.allowPublic,
   });
@@ -461,7 +525,7 @@ export async function probeOpenAiCompatibleModels(
       );
     }
     const body = await readBoundedJson(response, opts);
-    return probeModelIds(body, opts);
+    return probeModelList(body, opts);
   } catch (error) {
     const aborted =
       (error instanceof Error && error.name === "AbortError") ||

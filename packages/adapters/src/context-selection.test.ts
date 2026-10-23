@@ -44,7 +44,8 @@ describe("bounded context selection", () => {
       role: "assistant",
       content: [{ type: "toolCall", id: "call", name: "upload", arguments: args }],
     };
-    expect(estimateContextTokens(assistant, 100)).toBeGreaterThan(10000);
+    // ~3 ASCII chars per token: still the full argument text, never the 100-token image estimate.
+    expect(estimateContextTokens(assistant, 100)).toBeGreaterThan(10000 / 3);
   });
   it("shortens every result in an indirectly protected tool group and rejects duplicate results", () => {
     const call = {
@@ -189,7 +190,7 @@ describe("bounded context selection", () => {
           content: [{ type: "text", text: JSON.stringify(payload) }],
         },
       ],
-      { budget: { ...budget, contextWindow: 4000 }, strategy: "retrieval" },
+      { budget: { ...budget, contextWindow: 1500 }, strategy: "retrieval" },
     );
     const content = selected.messages.at(-1)!.content as Array<{ text: string }>;
     const decoded = JSON.parse(content[0]!.text);
