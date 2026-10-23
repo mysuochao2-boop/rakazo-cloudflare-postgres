@@ -6,6 +6,11 @@ import {
   openScreenCapability,
   SCREEN_TARGET_ENDPOINT,
 } from "@rakazo/core/node/screen-capability";
+import {
+  isDirectScreenUrl,
+  issueDirectScreenCapability,
+  type ScreenDirectConfig,
+} from "@rakazo/core/node/screen-direct";
 import type { PrismaClient } from "@rakazo/db";
 import type { Hono } from "hono";
 import { requestBodyLimit } from "./request-body-limit.js";
@@ -16,11 +21,17 @@ export function addScreenProxyCapability(
   origin: string,
   scope: ScreenCapabilityScope,
   now = Date.now(),
+  direct?: ScreenDirectConfig,
 ) {
   // Local/desktop providers return non-http schemes (e.g. desktop://). Those never
   // traverse the web proxy, so seal only http(s) upstream URLs.
   const protocol = new URL(url).protocol;
   if (protocol !== "http:" && protocol !== "https:") return url;
+  // RAKAZO_SCREEN_DIRECT: supervisor noVNC URLs on the direct origin skip the Worker
+  // relay. Everything else (terminals, other providers) keeps the /novnc capability.
+  if (direct && isDirectScreenUrl(url, direct)) {
+    return issueDirectScreenCapability(url, direct, scope, now);
+  }
   return issueScreenCapability(url, secret, origin, scope, now);
 }
 

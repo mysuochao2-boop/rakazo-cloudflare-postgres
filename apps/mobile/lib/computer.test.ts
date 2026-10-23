@@ -93,6 +93,19 @@ describe("screen stream identity", () => {
     );
   });
 
+  it("treats RAKAZO_SCREEN_DIRECT /direct/ capabilities like /novnc/ ones", () => {
+    const direct = (token: string, expiresAt: number, policy = "view") =>
+      `https://computer.example/direct/${policy}/${expiresAt}.${token}/embed.html?autoconnect=true&resize=scale&view_only=${policy === "view"}&path=websockify`;
+    const held = direct("oldToken", now + 10 * 60_000);
+    const renewed = direct("newToken", now + 60 * 60_000);
+    expect(screenStreamKey(held)).toBe(screenStreamKey(renewed));
+    expect(screenStreamKey(held)).not.toBe(screenStreamKey(direct("x", now, "control")));
+    expect(retainScreenSource(direct("a", now + 60 * 60_000), renewed, now)).toBe(
+      direct("a", now + 60 * 60_000),
+    );
+    expect(retainScreenSource(held, renewed, now)).toBe(renewed);
+  });
+
   it("reconnects when view vs control changes or the computer origin changes", () => {
     expect(screenStreamKey(view("aaaToken"))).not.toBe(screenStreamKey(control("aaaToken")));
     expect(retainScreenSource(view("aaaToken"), control("cccToken"), now)).toBe(

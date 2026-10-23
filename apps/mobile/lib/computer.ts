@@ -76,8 +76,10 @@ export function embeddableScreenUrl(url: string | null, apiBase: string): string
 export function screenStreamKey(url: string): string {
   try {
     const parsed = new URL(url);
-    const match = parsed.pathname.match(/^\/novnc\/session\/(view|control)\/[^/]+(\/.*)?$/);
-    if (match) return `${parsed.origin}/novnc/session/${match[1]}${match[2] ?? ""}`;
+    const match = parsed.pathname.match(
+      /^\/(novnc\/session|direct)\/(view|control)\/[^/]+(\/.*)?$/,
+    );
+    if (match) return `${parsed.origin}/${match[1]}/${match[2]}${match[3] ?? ""}`;
     const viewOnly = parsed.searchParams.get("view_only");
     const policy = viewOnly == null ? "" : `?view_only=${viewOnly}`;
     return `${parsed.origin}${parsed.pathname}${policy}`;
@@ -98,7 +100,9 @@ const SCREEN_SOURCE_RENEW_REMAINING_MS =
 
 function screenCapabilityExpiresAt(url: string): number | null {
   try {
-    const match = new URL(url).pathname.match(/^\/novnc\/session\/(?:view|control)\/(\d+)\./);
+    const match = new URL(url).pathname.match(
+      /^\/(?:novnc\/session|direct)\/(?:view|control)\/(\d+)\./,
+    );
     if (!match) return null;
     const expiresAt = Number(match[1]);
     return Number.isSafeInteger(expiresAt) ? expiresAt : null;
