@@ -88,7 +88,9 @@ function screenSetupScript(index: number, interactive: boolean, profile: string)
 mkdir -p /tmp/rakazo /tmp/.X11-unix /tmp/fluxbox-home-${display}/.fluxbox
 if ! xdpyinfo -display :${display} >/dev/null 2>&1; then
   rm -f /tmp/.X${display}-lock /tmp/.X11-unix/X${display}
-  nohup Xvfb :${display} -screen 0 1280x800x24 -ac +extension RANDR +render -noreset -nolisten tcp >/tmp/rakazo/xvfb-${display}.log 2>&1 &
+  screen_size="\${RAKAZO_SCREEN_RESOLUTION:-1280x800}"
+  case "$screen_size" in [1-9][0-9][0-9]x[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]x[1-9][0-9][0-9]|[1-9][0-9][0-9]x[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9]x[1-9][0-9][0-9][0-9]) ;; *) screen_size=1280x800 ;; esac
+  nohup Xvfb :${display} -screen 0 "\${screen_size}x24" -ac +extension RANDR +render -noreset -nolisten tcp >/tmp/rakazo/xvfb-${display}.log 2>&1 &
   for i in $(seq 1 100); do xdpyinfo -display :${display} >/dev/null 2>&1 && break; sleep 0.1; done
   cp /etc/rakazo/fluxbox/init /tmp/fluxbox-home-${display}/.fluxbox/init
   cp /etc/rakazo/fluxbox/apps /tmp/fluxbox-home-${display}/.fluxbox/apps 2>/dev/null || true
@@ -117,7 +119,9 @@ for i in $(seq 1 50); do
   sleep 0.1
 done
 [ "$ports_closed" = 1 ] || exit 1
-nohup x11vnc -display :${display} -forever -shared ${viewOnly} -nopw -listen 127.0.0.1 -rfbport ${vncPort} -xkb -ncache 0 >/tmp/rakazo/x11vnc-${display}.log 2>&1 &
+vnc_tuning="\${RAKAZO_X11VNC_ARGS--nowf -noxrecord}"
+case "$vnc_tuning" in *[!-a-zA-Z0-9_.:\\ ]*) vnc_tuning='-nowf -noxrecord' ;; esac
+nohup x11vnc -display :${display} -forever -shared ${viewOnly} -nopw -listen 127.0.0.1 -rfbport ${vncPort} -xkb -ncache 0 $vnc_tuning >/tmp/rakazo/x11vnc-${display}.log 2>&1 &
 vnc_pid=$!
 printf '%s\n' "$vnc_pid" >/tmp/rakazo/x11vnc-${display}.pid
 nohup websockify --heartbeat=30 --web=/usr/share/novnc 0.0.0.0:${webPort} 127.0.0.1:${vncPort} >/tmp/rakazo/novnc-${display}.log 2>&1 &

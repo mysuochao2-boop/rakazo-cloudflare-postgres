@@ -35,7 +35,10 @@ fi
 
 rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 
-Xvfb :1 -screen 0 1280x800x24 -ac +extension RANDR +render -noreset >/tmp/rakazo/xvfb.log 2>&1 &
+# RAKAZO_SCREEN_RESOLUTION (WIDTHxHEIGHT) comes from the supervisor; malformed values fall back.
+screen_size="${RAKAZO_SCREEN_RESOLUTION:-1280x800}"
+[[ "$screen_size" =~ ^[1-9][0-9]{2,3}x[1-9][0-9]{2,3}$ ]] || screen_size=1280x800
+Xvfb :1 -screen 0 "${screen_size}x24" -ac +extension RANDR +render -noreset >/tmp/rakazo/xvfb.log 2>&1 &
 XVFB_PID=$!
 
 ready=0
@@ -99,7 +102,11 @@ if ! xdg-settings set default-web-browser rakazo-browser.desktop >/dev/null 2>&1
   exit 1
 fi
 
-x11vnc -display :1 -forever -shared -viewonly -nopw -listen 127.0.0.1 -rfbport 5900 -xkb -ncache 0 >/tmp/rakazo/x11vnc.log 2>&1 &
+# RAKAZO_X11VNC_ARGS adds x11vnc tuning flags; empty disables the defaults.
+vnc_tuning="${RAKAZO_X11VNC_ARGS--nowf -noxrecord}"
+[[ "$vnc_tuning" =~ ^[-a-zA-Z0-9_.:\ ]*$ ]] || vnc_tuning="-nowf -noxrecord"
+read -r -a vnc_tuning_args <<<"$vnc_tuning"
+x11vnc -display :1 -forever -shared -viewonly -nopw -listen 127.0.0.1 -rfbport 5900 -xkb -ncache 0 "${vnc_tuning_args[@]}" >/tmp/rakazo/x11vnc.log 2>&1 &
 
 NOVNC_ROOT=/usr/share/novnc
 if [[ ! -d "$NOVNC_ROOT" ]]; then

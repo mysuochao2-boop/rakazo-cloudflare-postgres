@@ -424,6 +424,48 @@ export function sandboxCommandTimedOut(exitCode: number, completedWithExit124: b
   return exitCode === 124 && !completedWithExit124;
 }
 
+export interface ObservationImageOptions {
+  format: "png" | "jpeg";
+  jpegQuality: number;
+}
+
+/**
+ * Screenshot encoding for computer observations. `RAKAZO_OBSERVE_FORMAT=jpeg` trades
+ * lossless PNG for a ~5-10x smaller frame; every supported model accepts image/jpeg.
+ */
+export function observationImageOptions(
+  env: NodeJS.ProcessEnv = process.env,
+): ObservationImageOptions {
+  const format = env.RAKAZO_OBSERVE_FORMAT?.trim().toLowerCase() || "png";
+  if (format !== "png" && format !== "jpeg" && format !== "jpg") {
+    throw new Error("RAKAZO_OBSERVE_FORMAT must be png or jpeg");
+  }
+  const rawQuality = env.RAKAZO_OBSERVE_JPEG_QUALITY?.trim();
+  const jpegQuality = rawQuality ? Number(rawQuality) : 80;
+  if (!Number.isInteger(jpegQuality) || jpegQuality < 30 || jpegQuality > 95) {
+    throw new Error("RAKAZO_OBSERVE_JPEG_QUALITY must be an integer from 30 to 95");
+  }
+  return { format: format === "png" ? "png" : "jpeg", jpegQuality };
+}
+
+/** Request fields for the computer control endpoint; older control servers ignore them. */
+export function observationRequestFields(options: ObservationImageOptions) {
+  return options.format === "jpeg"
+    ? { imageFormat: "jpeg" as const, jpegQuality: options.jpegQuality }
+    : {};
+}
+
+/** Shell for the docker-exec observation fallback; prints `MIME` before `IMAGE`. */
+export function observationCaptureShell(options: ObservationImageOptions) {
+  return options.format === "jpeg"
+    ? [
+        'printf "MIME image/jpeg\\n"',
+        'printf "IMAGE "',
+        `import -window root -strip -quality ${options.jpegQuality} jpeg:- 2>/dev/null | base64 -w0`,
+      ]
+    : ['printf "IMAGE "', "import -window root png:- 2>/dev/null | base64 -w0"];
+}
+
 export function parseObservation(output: string) {
   const geometry = output.match(/^GEOM\s+(\d+)\s+(\d+)$/m);
   const cursorLine = output.match(/^CURSOR\s+(.+)$/m)?.[1] ?? "";
@@ -433,9 +475,12 @@ export function parseObservation(output: string) {
   const title = output.match(/^TITLE\s*(.*)$/m)?.[1]?.trim();
   const image = output.match(/^IMAGE\s+([A-Za-z0-9+/=]+)$/m)?.[1];
   if (!image) throw new Error("screen capture returned no image");
+  const mimeType: "image/png" | "image/jpeg" = /^MIME\s+image\/jpeg$/m.test(output)
+    ? "image/jpeg"
+    : "image/png";
   return {
     image,
-    mimeType: "image/png" as const,
+    mimeType,
     width: Number(geometry?.[1] ?? 1280),
     height: Number(geometry?.[2] ?? 800),
     ...(Number.isFinite(cursorX) && Number.isFinite(cursorY)

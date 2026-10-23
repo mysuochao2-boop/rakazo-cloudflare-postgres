@@ -45,6 +45,19 @@ export function isScreenProxyTarget(value: unknown): value is ScreenProxyTarget 
   );
 }
 
+/**
+ * Optional noVNC Tight encoding levels the supervisor put on the screen URL.
+ * Only single digits pass, so the browser query cannot carry anything else.
+ */
+function vncEncodingParams(search: URLSearchParams) {
+  const params: Record<string, string> = {};
+  for (const name of ["quality", "compression"]) {
+    const value = search.get(name);
+    if (value && /^[0-9]$/.test(value)) params[name] = value;
+  }
+  return params;
+}
+
 export function sealScreenCapability(
   url: string,
   secret: string,
@@ -78,6 +91,7 @@ export function sealScreenCapability(
     // Our embed resolves the socket relative to its own capability directory;
     // stock noVNC resolves it from the origin root.
     path: target.pathname.endsWith("/embed.html") ? "websockify" : `${prefix.slice(1)}/websockify`,
+    ...vncEncodingParams(target.searchParams),
   }).toString();
   return result.toString();
 }

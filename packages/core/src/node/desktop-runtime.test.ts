@@ -26,9 +26,11 @@ import {
   releaseDesktopCommand,
   resetDesktopRuntimeCommand,
   screenPorts,
+  screenResolutionShell,
   shellQuote,
   stopExtraScreenCommand,
   terminalCommand,
+  x11vncTuningShell,
 } from "./desktop-runtime.js";
 
 const JOINED_COMMAND = `import os, time
@@ -518,5 +520,40 @@ describe("shared Linux desktop lifecycle", () => {
     );
     expect(url.searchParams.get("_token")).toBe("provider-key");
     expect(url.searchParams.get("path")).toBe("websockify?_token=provider-key&token=view-key");
+  });
+});
+
+describe("desktop display tuning", () => {
+  const resolve = (env: Record<string, string>) =>
+    spawnSync(
+      "sh",
+      [
+        "-c",
+        `${screenResolutionShell()}\n${x11vncTuningShell()}\nprintf '%s|%s' "$screen_size" "$vnc_tuning"`,
+      ],
+      { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...env }, encoding: "utf8" },
+    ).stdout;
+
+  it("sizes Xvfb and tunes x11vnc from the computer env", () => {
+    expect(resolve({})).toBe("1280x800|-nowf -noxrecord");
+    expect(resolve({ RAKAZO_SCREEN_RESOLUTION: "1280x720", RAKAZO_X11VNC_ARGS: "" })).toBe(
+      "1280x720|",
+    );
+    expect(resolve({ RAKAZO_X11VNC_ARGS: "-wait 10 -defer 10" })).toBe(
+      "1280x800|-wait 10 -defer 10",
+    );
+  });
+
+  it("falls back instead of executing malformed values", () => {
+    expect(
+      resolve({ RAKAZO_SCREEN_RESOLUTION: "1x1;touch /tmp/x", RAKAZO_X11VNC_ARGS: "-a $(id)" }),
+    ).toBe("1280x800|-nowf -noxrecord");
+  });
+
+  it("uses the tuned values in screen startup commands without moving the socket match", () => {
+    const view = ensureScreenCommand(1, "bot", "token");
+    expect(view).toContain("-screen 0 ${screen_size}x24");
+    expect(view).toMatch(/-unixsock \S+ -xkb -ncache 0 \$vnc_tuning /);
+    expect(interactiveScreenCommand(true, "token")).toContain("-ncache 0 $vnc_tuning ");
   });
 });

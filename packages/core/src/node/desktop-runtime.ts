@@ -29,6 +29,38 @@ export const DEFAULT_DESKTOP_ENV: DesktopEnvironment = {
   displayStart: 1,
   preservePrimaryDisplay: true,
 };
+/** Xvfb size when the computer does not set `RAKAZO_SCREEN_RESOLUTION`. */
+export const DEFAULT_SCREEN_RESOLUTION = "1280x800";
+/**
+ * x11vnc flags added when the computer does not set `RAKAZO_X11VNC_ARGS`.
+ * `-nowf` drops wireframe window-move detection and `-noxrecord` drops XRECORD
+ * scroll detection; both are CPU-heavy heuristics that stall on browser scrolling.
+ */
+export const DEFAULT_X11VNC_TUNING_ARGS = "-nowf -noxrecord";
+
+/**
+ * POSIX shell that sets `screen_size` from the computer's `RAKAZO_SCREEN_RESOLUTION`,
+ * falling back to the default for an unset or malformed value.
+ */
+export function screenResolutionShell() {
+  return [
+    `screen_size="\${RAKAZO_SCREEN_RESOLUTION:-${DEFAULT_SCREEN_RESOLUTION}}"`,
+    `case "$screen_size" in [1-9][0-9][0-9]x[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]x[1-9][0-9][0-9]|[1-9][0-9][0-9]x[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9]x[1-9][0-9][0-9][0-9]) ;; *) screen_size=${DEFAULT_SCREEN_RESOLUTION} ;; esac`,
+  ].join("\n");
+}
+
+/**
+ * POSIX shell that sets `vnc_tuning` from `RAKAZO_X11VNC_ARGS` (an empty value disables the
+ * defaults). Anything but flag-like words falls back to the defaults, so the unquoted
+ * expansion cannot inject shell syntax.
+ */
+export function x11vncTuningShell() {
+  return [
+    `vnc_tuning="\${RAKAZO_X11VNC_ARGS-${DEFAULT_X11VNC_TUNING_ARGS}}"`,
+    `case "$vnc_tuning" in *[!-a-zA-Z0-9_.:\\ ]*) vnc_tuning=${shellQuote(DEFAULT_X11VNC_TUNING_ARGS)} ;; esac`,
+  ].join("\n");
+}
+
 export function screenPorts(index: number, env = DEFAULT_DESKTOP_ENV) {
   if (!Number.isSafeInteger(index) || index < 0 || index + env.displayStart > MAX_DESKTOP_DISPLAY)
     throw new Error("invalid desktop index");
@@ -523,7 +555,8 @@ function renderEnsureScreenCommand(
           `if ! xdpyinfo -display ${layout.display} >/dev/null 2>&1; then`,
           `  mkdir -p /tmp/rakazo ${fluxHome}/.fluxbox /tmp/.X11-unix`,
           `  rm -f /tmp/.X${layout.displayNumber}-lock /tmp/.X11-unix/X${layout.displayNumber}`,
-          `  nohup Xvfb ${layout.display} -screen 0 1280x800x24 -ac +extension RANDR +render -noreset -nolisten tcp 8>&- 9>&- </dev/null >${log}-xvfb.log 2>&1 &`,
+          `  ${screenResolutionShell().replaceAll("\n", "\n  ")}`,
+          `  nohup Xvfb ${layout.display} -screen 0 \${screen_size}x24 -ac +extension RANDR +render -noreset -nolisten tcp 8>&- 9>&- </dev/null >${log}-xvfb.log 2>&1 &`,
           `  for i in $(seq 1 100); do xdpyinfo -display ${layout.display} >/dev/null 2>&1 && break; sleep 0.1; done`,
           `  xdpyinfo -display ${layout.display} >/dev/null 2>&1 || exit 1`,
           `  if [ -f /etc/rakazo/fluxbox/init ]; then cp /etc/rakazo/fluxbox/init ${fluxHome}/.fluxbox/init; else printf "session.screen0.toolbar.visible: false\\n" >${fluxHome}/.fluxbox/init; fi`,
@@ -538,7 +571,8 @@ function renderEnsureScreenCommand(
     `mkdir -p ${TARGETS} /tmp/rakazo/sockets`,
     `if [ ! -S ${socket} ] || ! pgrep -f ${quoteLayout(`^([^ ]*/)?x11vnc .* -unixsock ${socket}( |$)`)} >/dev/null; then`,
     stopVncCommand("view", layout),
-    `  nohup x11vnc -display ${layout.display} -forever -shared -viewonly -nopw -rfbport 0 -unixsock ${socket} -xkb -ncache 0 8>&- 9>&- </dev/null >${log}-x11vnc.log 2>&1 &`,
+    `  ${x11vncTuningShell().replaceAll("\n", "\n  ")}`,
+    `  nohup x11vnc -display ${layout.display} -forever -shared -viewonly -nopw -rfbport 0 -unixsock ${socket} -xkb -ncache 0 $vnc_tuning 8>&- 9>&- </dev/null >${log}-x11vnc.log 2>&1 &`,
     "fi",
     `for i in $(seq 1 50); do [ -S ${socket} ] && break; sleep 0.1; done`,
     `[ -S ${socket} ] || exit 1`,
@@ -612,7 +646,8 @@ export function interactiveScreenCommand(
     stopProcesses,
     `mkdir -p ${TARGETS} /tmp/rakazo/sockets`,
     `printf %s ${shellQuote(controlToken)} >${tokenFile}`,
-    `nohup x11vnc -display ${layout.display} -forever -shared -nopw -rfbport 0 -unixsock ${socket} -xkb -ncache 0 8>&- 9>&- </dev/null >/tmp/rakazo/x11vnc-control-${layout.displayNumber}.log 2>&1 &`,
+    x11vncTuningShell(),
+    `nohup x11vnc -display ${layout.display} -forever -shared -nopw -rfbport 0 -unixsock ${socket} -xkb -ncache 0 $vnc_tuning 8>&- 9>&- </dev/null >/tmp/rakazo/x11vnc-control-${layout.displayNumber}.log 2>&1 &`,
     `for i in $(seq 1 50); do [ -S ${socket} ] && break; sleep 0.1; done`,
     `[ -S ${socket} ] || exit 1`,
     `printf '%s: unix_socket:%s\\n' ${shellQuote(controlToken)} ${socket} >/tmp/rakazo/control-target-next-${layout.displayNumber}`,
