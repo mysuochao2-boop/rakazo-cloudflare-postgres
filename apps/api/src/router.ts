@@ -156,6 +156,7 @@ import {
   isOneShotRoutineCrons,
   nextCronDateAcrossStrict,
 } from "@rakazo/core";
+import type { ScreenDirectConfig } from "@rakazo/core/node/screen-direct";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   appendEventInTransaction,
@@ -582,6 +583,7 @@ export interface RouterDeps {
     webOrigin: string;
     privacyPolicyUrl?: string;
     screenProxySecret: string;
+    screenDirect?: ScreenDirectConfig;
     sandboxProvider: string;
     gitSha?: string;
     updaterUrl?: string;
@@ -3089,6 +3091,8 @@ export function createRouter(deps: RouterDeps) {
               computerGeneration: computer.screenGeneration,
               controlLeaseId: computer.controlLeaseId,
             },
+            Date.now(),
+            deps.env.screenDirect,
           ),
         };
       }),
@@ -3130,13 +3134,20 @@ export function createRouter(deps: RouterDeps) {
           !(hasActiveComputerControl(bot.computer) && bot.computer.controlBotId === bot.id),
         );
         return {
-          url: addScreenProxyCapability(viewUrl, deps.env.screenProxySecret, deps.env.webOrigin, {
-            botId: bot.id,
-            computerId: computer.id,
-            botGeneration: bot.screenGeneration,
-            computerGeneration: computer.screenGeneration,
-            controlLeaseId: computer.controlLeaseId,
-          }),
+          url: addScreenProxyCapability(
+            viewUrl,
+            deps.env.screenProxySecret,
+            deps.env.webOrigin,
+            {
+              botId: bot.id,
+              computerId: computer.id,
+              botGeneration: bot.screenGeneration,
+              computerGeneration: computer.screenGeneration,
+              controlLeaseId: computer.controlLeaseId,
+            },
+            Date.now(),
+            deps.env.screenDirect,
+          ),
         };
       }),
       heartbeat: authed.computer.heartbeat.handler(async ({ context, input }) => {

@@ -47,6 +47,11 @@
       "types": "./src/node/screen-capability.ts",
       "development": "./src/node/screen-capability.ts",
       "default": "./src/node/screen-capability.ts"
+    },
+    "./node/screen-direct": {
+      "types": "./src/node/screen-direct.ts",
+      "development": "./src/node/screen-direct.ts",
+      "default": "./src/node/screen-direct.ts"
     }
   },
   "scripts": {

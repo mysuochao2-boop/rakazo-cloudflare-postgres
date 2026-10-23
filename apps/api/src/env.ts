@@ -11,6 +11,11 @@ import {
   resolveScreenProxySecret,
   resolveSupervisorToken,
 } from "@rakazo/core";
+import {
+  resolveScreenDirectConfig,
+  type ScreenDirectConfig,
+} from "@rakazo/core/node/screen-direct";
+import { getLogger } from "@rakazo/logging";
 
 export { resolveCloudAgentProvider, resolveSandboxProvider } from "@rakazo/adapters";
 
@@ -36,6 +41,8 @@ export interface AppEnv {
   sandboxSupervisorUrl: string;
   sandboxSupervisorToken: string | undefined;
   screenProxySecret: string;
+  /** RAKAZO_SCREEN_DIRECT opt-in: noVNC goes straight to the supervisor host. */
+  screenDirect?: ScreenDirectConfig;
   sandboxProvider: string;
   cloudAgentProvider: string;
   cloudAgentSpaceId: string | undefined;
@@ -176,6 +183,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     sandboxSupervisorToken:
       sandboxProvider === "docker" ? resolveSupervisorToken(source) : undefined,
     screenProxySecret: resolveScreenProxySecret(source),
+    screenDirect: resolveScreenDirectConfig(source, (message) => getLogger().warn(message)),
     sandboxProvider,
     cloudAgentProvider,
     cloudAgentSpaceId: optional(source.CLOUD_AGENT_SPACE_ID),

@@ -111,4 +111,13 @@ describe("screenIframeSandbox", () => {
     );
     expect(screenIframeSandbox("http://127.0.0.1:5173/vnc.html")).toBeUndefined();
   });
+
+  it("gives cross-origin /direct/ screens a real origin for the websocket Origin check", () => {
+    vi.stubGlobal("window", { location: { href: "https://bot.example/" } });
+    expect(
+      screenIframeSandbox("https://computer.example/direct/view/1.tok/embed.html?path=websockify"),
+    ).toBe("allow-scripts allow-same-origin allow-pointer-lock");
+    // Never allow-same-origin for a page on the app's own origin.
+    expect(screenIframeSandbox("https://bot.example/direct/view/1.tok/embed.html")).toBeUndefined();
+  });
 });

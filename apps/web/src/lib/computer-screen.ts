@@ -46,9 +46,17 @@ export function embeddableScreenUrl(url: string | null): string | null {
 export function screenIframeSandbox(url: string | null) {
   if (!url) return undefined;
   try {
-    return new URL(url, window.location.href).pathname.startsWith("/novnc/")
-      ? "allow-scripts allow-pointer-lock"
-      : undefined;
+    const parsed = new URL(url, window.location.href);
+    if (parsed.pathname.startsWith("/novnc/")) return "allow-scripts allow-pointer-lock";
+    // RAKAZO_SCREEN_DIRECT: noVNC served by the supervisor host. Its websocket Origin check
+    // needs a real origin, and allow-same-origin is safe because that origin is not ours.
+    if (
+      parsed.pathname.startsWith("/direct/") &&
+      parsed.origin !== new URL(window.location.href).origin
+    ) {
+      return "allow-scripts allow-same-origin allow-pointer-lock";
+    }
+    return undefined;
   } catch {
     return undefined;
   }

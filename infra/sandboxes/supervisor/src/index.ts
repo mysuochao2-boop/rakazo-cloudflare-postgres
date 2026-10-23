@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import http from "node:http";
+import http, { type IncomingMessage } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
+import type { Duplex } from "node:stream";
 import { PassThrough, Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
@@ -56,6 +57,13 @@ import {
   xdotoolCommand,
 } from "./computer-spec.js";
 import { assertComputerHomeWritable, ensureLocalKeyComputerHome } from "./home-ownership.js";
+import {
+  cachedScreenPortCheck,
+  handleDirectScreenRequest,
+  handleDirectScreenUpgrade,
+  isDirectScreenPath,
+  screenDirectSupervisorConfig,
+} from "./screen-direct.js";
 import {
   assertRequestIdentity,
   attemptComputerControl,
@@ -160,6 +168,20 @@ export function resolveDockerSocketPath(
 }
 
 app.get("/health", (c) => c.json({ ok: true, image: COMPUTER_IMAGE }));
+
+// RAKAZO_SCREEN_DIRECT: browser noVNC straight to this host (see screen-direct.ts).
+// Mounted outside /computers, so the supervisor bearer token does not apply; the
+// sealed capability in the path is the credential.
+const SCREEN_DIRECT = screenDirectSupervisorConfig();
+const isDirectScreenPort = cachedScreenPortCheck(async () => {
+  const listed = await docker.listContainers({ filters: { label: ["rakazo.managed=true"] } });
+  return listed.flatMap((item) =>
+    (item.Ports ?? []).flatMap((port) => (port.PublicPort ? [port.PublicPort] : [])),
+  );
+});
+app.on(["GET", "HEAD"], "/direct/*", (c) =>
+  handleDirectScreenRequest(c.req.raw, SCREEN_DIRECT, isDirectScreenPort),
+);
 
 app.use("/computers", async (c, next) => {
   if (!hasValidBearerToken(c.req.header("authorization"), supervisorToken)) {
@@ -1093,6 +1115,20 @@ function startSupervisor() {
   const hostname = process.env.SUPERVISOR_HOST ?? "127.0.0.1";
   const server = serve({ fetch: app.fetch, hostname, port }, () => {
     logger.info("supervisor listening", { "http.host": hostname, "http.port": port });
+  });
+  server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const pathname = new URL(request.url ?? "/", "http://supervisor.invalid").pathname;
+    if (!isDirectScreenPath(pathname)) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    void handleDirectScreenUpgrade(request, socket, head, SCREEN_DIRECT, isDirectScreenPort).catch(
+      (error: unknown) => {
+        logger.warn("screen direct upgrade failed", { error: String(error) });
+        socket.destroy();
+      },
+    );
   });
   let stopping = false;
   const shutdown = async () => {

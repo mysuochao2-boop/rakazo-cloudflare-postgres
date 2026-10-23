@@ -76,6 +76,11 @@ services:
       SANDBOX_SCREEN_HOST: ${SANDBOX_SCREEN_HOST:-127.0.0.1}
       # Hybrid: public URL base for /screen/<port>/ via Nginx (Docker HostIp stays 127.0.0.1).
       PUBLIC_SCREEN_BASE: ${PUBLIC_SCREEN_BASE:-}
+      # RAKAZO_SCREEN_DIRECT (off unless the secret is set): /direct/ noVNC capabilities
+      # sealed by the API; same value as the API's RAKAZO_SCREEN_DIRECT_SECRET.
+      RAKAZO_SCREEN_DIRECT_SECRET: ${RAKAZO_SCREEN_DIRECT_SECRET:-}
+      RAKAZO_SCREEN_DIRECT_ALLOWED_ORIGINS: ${RAKAZO_SCREEN_DIRECT_ALLOWED_ORIGINS:-}
+      RAKAZO_SCREEN_DIRECT_FRAME_ANCESTORS: ${RAKAZO_SCREEN_DIRECT_FRAME_ANCESTORS:-}
       SANDBOX_COMPUTER_EGRESS: ${SANDBOX_COMPUTER_EGRESS:-restricted}
       # Display/observation tuning (empty = built-in defaults; see docs/computer-runtime.md).
       RAKAZO_SCREEN_RESOLUTION: ${RAKAZO_SCREEN_RESOLUTION:-}

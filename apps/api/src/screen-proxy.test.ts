@@ -162,4 +162,39 @@ describe("screen capability lifecycle authorization", () => {
       "local://preview",
     );
   });
+  it("issues /direct/ capabilities only when RAKAZO_SCREEN_DIRECT is configured", () => {
+    const direct = { secret: "d".repeat(40), origin: "https://computer.example" };
+    const supervisorUrl =
+      "https://computer.example/screen/32768/embed.html?path=websockify%3Ftoken%3Dprov&view_only=true";
+    const off = new URL(
+      addScreenProxyCapability(supervisorUrl, secret, "https://app.example", scope, Date.now()),
+    );
+    expect(off.origin).toBe("https://app.example");
+    expect(off.pathname).toMatch(/^\/novnc\/session\/view\//);
+    const on = new URL(
+      addScreenProxyCapability(
+        supervisorUrl,
+        secret,
+        "https://app.example",
+        scope,
+        Date.now(),
+        direct,
+      ),
+    );
+    expect(on.origin).toBe("https://computer.example");
+    expect(on.pathname).toMatch(/^\/direct\/view\/\d+\./);
+    expect(on.toString()).not.toContain("prov");
+    // Other upstreams (terminal, other providers/hosts) keep the Worker relay.
+    const other = new URL(
+      addScreenProxyCapability(
+        "http://127.0.0.1:49152/embed.html?view_only=true",
+        secret,
+        "https://app.example",
+        scope,
+        Date.now(),
+        direct,
+      ),
+    );
+    expect(other.pathname).toMatch(/^\/novnc\/session\//);
+  });
 });
