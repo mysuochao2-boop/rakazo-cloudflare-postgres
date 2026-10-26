@@ -1,4 +1,4 @@
-import type { ModelCatalogEntry } from "@rakazo/contracts";
+import type { ModelCatalogEntry, OpenAiCompatibleCompat } from "@rakazo/contracts";
 import { matchesSearchQuery } from "./search.js";
 
 /** Effort choices an OpenAI-compatible endpoint stores when reasoning is enabled. */
@@ -12,6 +12,56 @@ export const COMPATIBLE_THINKING_LEVELS = [
 ] as const;
 
 const THINKING_LEVELS = ["off", ...COMPATIBLE_THINKING_LEVELS] as const;
+
+/** True only for the official OpenAI API host. */
+export function isOfficialOpenAiBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    return new URL(baseUrl.trim()).hostname.toLowerCase() === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an OpenAI-compatible connection sends reasoning_effort when thinking is
+ * on. Only the official host does by default; other servers need an opt-in.
+ */
+export function compatibleSendsReasoningEffort(
+  baseUrl: string | undefined,
+  compat: OpenAiCompatibleCompat | undefined,
+): boolean {
+  return compat?.supportsReasoningEffort ?? isOfficialOpenAiBaseUrl(baseUrl);
+}
+
+/** Whether an OpenAI-compatible connection sends stream_options (on by default). */
+export function compatibleStreamsUsage(compat: OpenAiCompatibleCompat | undefined): boolean {
+  return compat?.supportsUsageInStreaming !== false;
+}
+
+/**
+ * Connect-time compat for an OpenAI-compatible connection from the settings
+ * form. Only values that differ from the host default are stored; `null`
+ * clears stored overrides. An existing maxTokensField override is kept.
+ */
+export function compatibleCompatInput(options: {
+  baseUrl: string;
+  reasoning: boolean;
+  sendReasoningEffort: boolean;
+  streamUsage: boolean;
+  previous?: OpenAiCompatibleCompat;
+}): OpenAiCompatibleCompat | null {
+  const compat: OpenAiCompatibleCompat = {};
+  if (options.previous?.maxTokensField) compat.maxTokensField = options.previous.maxTokensField;
+  if (!options.streamUsage) compat.supportsUsageInStreaming = false;
+  if (
+    options.reasoning &&
+    options.sendReasoningEffort !== isOfficialOpenAiBaseUrl(options.baseUrl)
+  ) {
+    compat.supportsReasoningEffort = options.sendReasoningEffort;
+  }
+  return Object.keys(compat).length > 0 ? compat : null;
+}
 
 /**
  * Map a staged effort onto the levels a model actually supports.

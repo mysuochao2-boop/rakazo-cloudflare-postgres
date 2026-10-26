@@ -3982,9 +3982,19 @@ msgstr "发送删除验证码"
 msgid "Send it"
 msgstr "发送"
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send reasoning_effort"
+msgstr "发送 reasoning_effort"
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "发送重置链接"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send stream_options (usage reporting)"
+msgstr "发送 stream_options（用量统计）"
 
 #: src/components/AskCard.tsx
 msgid "Sending…"

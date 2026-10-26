@@ -371,6 +371,8 @@ export const DE_MESSAGES: Record<string, string> = {
   "Starting…": "Wird gestartet…",
   Submit: "Absenden",
   "Supports images": "Unterstützt Bilder",
+  "Send reasoning_effort": "reasoning_effort senden",
+  "Send stream_options (usage reporting)": "stream_options senden (Nutzungsberichte)",
   "Supports thinking": "Unterstützt Denkmodus",
   "Switching…": "Wird gewechselt…",
   "The final page may not load. Paste its URL or code here.":

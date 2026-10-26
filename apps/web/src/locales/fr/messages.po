@@ -3982,9 +3982,19 @@ msgstr "Envoyer le code de suppression"
 msgid "Send it"
 msgstr "L'envoyer"
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send reasoning_effort"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Envoyer le lien de réinitialisation"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send stream_options (usage reporting)"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Sending…"

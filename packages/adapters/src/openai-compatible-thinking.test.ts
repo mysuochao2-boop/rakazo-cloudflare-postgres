@@ -66,6 +66,7 @@ describe("OpenAI-compatible standard thinking transport", () => {
     reasoning?: "minimal" | "low" | "medium" | "high",
     supportsThinking = true,
     maxTokens?: number,
+    sendEffort = true,
   ) {
     let payload: Payload | undefined;
     const mockFetch = vi.fn<typeof fetch>(async (input, init) => {
@@ -79,6 +80,7 @@ describe("OpenAI-compatible standard thinking transport", () => {
       baseUrl,
       reasoning: supportsThinking,
       maxTokens,
+      ...(sendEffort ? { compat: { supportsReasoningEffort: true } } : {}),
     });
     const model = models.getModel(provider, modelId) as Model<"openai-completions">;
     const stream = models.streamSimple(
@@ -105,13 +107,24 @@ describe("OpenAI-compatible standard thinking transport", () => {
   }
 
   it.each(["minimal", "low", "medium", "high"] as const)(
-    "sends standard effort %s unchanged",
+    "sends standard effort %s unchanged when the credential opts in",
     async (level) => {
       const { payload } = await capture(level);
       expect(payload.reasoning_effort).toBe(level);
       expect(payload.chat_template_kwargs).toBeUndefined();
     },
   );
+
+  it("does not send reasoning_effort to a generic server unless the credential opts in", async () => {
+    const { payload, result } = await capture("high", true, undefined, false);
+    expect(payload.reasoning_effort).toBeUndefined();
+    expect(payload.chat_template_kwargs).toBeUndefined();
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "thinking", thinking: "Check the fixture." }),
+      ]),
+    );
+  });
 
   it("sends the configured maximum output-token limit", async () => {
     const { payload } = await capture("medium", true, 8192);

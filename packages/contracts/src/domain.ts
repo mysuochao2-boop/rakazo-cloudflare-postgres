@@ -1048,6 +1048,19 @@ export function modelOutputLeavesInputRoom(
   return typeof maxTokens !== "number" || contextWindow === undefined || maxTokens < contextWindow;
 }
 
+/**
+ * Whitelisted per-connection wire overrides for OpenAI-compatible endpoints.
+ * Absent fields keep the host-derived defaults.
+ */
+export const OpenAiCompatibleCompatSchema = z
+  .object({
+    maxTokensField: z.enum(["max_tokens", "max_completion_tokens"]).optional(),
+    supportsUsageInStreaming: z.boolean().optional(),
+    supportsReasoningEffort: z.boolean().optional(),
+  })
+  .strict();
+export type OpenAiCompatibleCompat = z.infer<typeof OpenAiCompatibleCompatSchema>;
+
 export const ModelCredentialSchema = z.object({
   ...ModelContextLimitsSchema.shape,
   id: Id,
@@ -1067,6 +1080,8 @@ export const ModelCredentialSchema = z.object({
   thinkingLevels: z.array(ThinkingLevelSchema).optional(),
   /** Stored secret kind. Absent when the secret could not be read. */
   authKind: z.enum(["api_key", "oauth", "openai_compatible"]).optional(),
+  /** OpenAI-compatible only: stored wire overrides. */
+  compat: OpenAiCompatibleCompatSchema.optional(),
 });
 export type ModelCredential = z.infer<typeof ModelCredentialSchema>;
 
@@ -1095,19 +1110,6 @@ export const ModelBackupListSchema = z
   });
 
 export const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible";
-
-/**
- * Whitelisted per-connection wire overrides for OpenAI-compatible endpoints.
- * Absent fields keep the host-derived defaults.
- */
-export const OpenAiCompatibleCompatSchema = z
-  .object({
-    maxTokensField: z.enum(["max_tokens", "max_completion_tokens"]).optional(),
-    supportsUsageInStreaming: z.boolean().optional(),
-    supportsReasoningEffort: z.boolean().optional(),
-  })
-  .strict();
-export type OpenAiCompatibleCompat = z.infer<typeof OpenAiCompatibleCompatSchema>;
 
 export const ModelConnectInputSchema = z
   .object({
