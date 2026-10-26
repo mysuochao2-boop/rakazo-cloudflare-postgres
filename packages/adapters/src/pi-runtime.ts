@@ -398,6 +398,11 @@ export class PiAgentRuntime implements AgentRuntime {
           imageTokens: estimatePiImageTokens,
         });
         const usageHooks = {
+          logContext: {
+            runId: request.runId,
+            threadId: request.threadId,
+            lane: request.lane ?? "interactive",
+          },
           prepareContext: contextPolicy.prepareContext,
           imageTokens: estimatePiImageTokens,
           recordUsage: request.onUsage,
@@ -1678,6 +1683,11 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
             host.modelCallObserver,
             { operationKind: "subagent", agentId },
             {
+              logContext: {
+                runId: host.request.runId,
+                threadId: host.request.threadId,
+                lane: host.request.lane ?? "interactive",
+              },
               prepareContext: contextPolicy.prepareContext,
               imageTokens: estimatePiImageTokens,
               recordUsage: host.request.onUsage,

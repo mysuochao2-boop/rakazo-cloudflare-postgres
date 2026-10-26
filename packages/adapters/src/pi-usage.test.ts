@@ -1,9 +1,12 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { AgentRuntimeEvent } from "@rakazo/adapter-kit";
+import { type RuntimeLogEntry, setRuntimeLogTap } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
+import { describeErrorCauseChain, withModelTransportLogContext } from "./model-transport-log.js";
 import { createOpenAiCompatibleFetch } from "./pi-openai-compatible-provider.js";
 import { PiAgentRuntime } from "./pi-runtime.js";
 import { normalizePiUsage, observedPiStream, usageReportingFetch } from "./pi-usage.js";
@@ -396,6 +399,86 @@ describe("Pi usage accounting", () => {
       server.close();
       await once(server, "close");
     }
+  });
+  it("dispatches the guarded undici Agent through usage observation over a real socket", async () => {
+    // Regression: wrapping Node's builtin fetch hid it from the provider's
+    // dispatcher pairing, so every OpenAI-compatible call failed with
+    // UND_ERR_INVALID_ARG ("Connection error.") before any DNS lookup.
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"ok":true}');
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address() as AddressInfo;
+    const lookups: string[] = [];
+    try {
+      const safe = createOpenAiCompatibleFetch(
+        usageReportingFetch(globalThis.fetch, new Set()),
+        async (hostname) => {
+          lookups.push(hostname);
+          return [{ address: "127.0.0.1", family: 4 }];
+        },
+      );
+      const response = await safe(`http://localhost:${port}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(lookups).toEqual(["localhost"]);
+    } finally {
+      server.close();
+      await once(server, "close");
+    }
+  });
+  it("reaches the address check instead of an undici dispatcher mismatch", async () => {
+    const safe = createOpenAiCompatibleFetch(
+      usageReportingFetch(globalThis.fetch, new Set()),
+      async () => {
+        throw new Error("lookup reached");
+      },
+      { allowPublic: true },
+    );
+    const error = await safe("https://models.example.test/v1/chat/completions").catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toMatchObject({ cause: { message: "lookup reached" } });
+    expect(JSON.stringify(describeErrorCauseChain(error))).not.toContain("UND_ERR_INVALID_ARG");
+  });
+  it("logs a sanitized transport cause chain with the run identity", async () => {
+    const entries: RuntimeLogEntry[] = [];
+    setRuntimeLogTap((entry) => entries.push(entry));
+    try {
+      const safe = createOpenAiCompatibleFetch(
+        usageReportingFetch(globalThis.fetch, new Set()),
+        async () => {
+          throw new Error(
+            "lookup failed for https://user:pw@models.example.test/v1?key=sk-abcdefghijkl",
+          );
+        },
+        { allowPublic: true },
+      );
+      await withModelTransportLogContext(
+        { runId: "run_1", threadId: "thr_1", lane: "interactive", provider: "p", model: "m" },
+        () => safe("https://models.example.test/v1/chat/completions?api_key=secret123"),
+      ).catch(() => undefined);
+    } finally {
+      setRuntimeLogTap(undefined);
+    }
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      code: "model.transport_error",
+      level: "error",
+      runId: "run_1",
+      threadId: "thr_1",
+      ok: false,
+    });
+    const summary = entries[0]?.summary ?? "";
+    expect(summary).toContain("host=models.example.test");
+    expect(summary).toContain("lookup failed");
+    expect(summary).not.toMatch(/secret123|sk-abcdefghijkl|api_key|\?key=|user:pw|\/v1/);
   });
   it("keeps network protections when composing raw-usage observation", async () => {
     const fetcher = vi.fn();
