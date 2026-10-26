@@ -584,6 +584,8 @@ export const RU_MESSAGES: Record<string, string> = {
   "Enter a whole number from 1 to {max} for the context limit.":
     "Введите целое число от 1 до {max} для лимита контекста.",
   "Supports images": "Поддерживает изображения",
+  "Send reasoning_effort": "Отправлять reasoning_effort",
+  "Send stream_options (usage reporting)": "Отправлять stream_options (учёт использования)",
   "Maximum images per request": "Максимум изображений в запросе",
   "Enter a whole number from 1 to 1000 for the image limit.":
     "Введите целое число от 1 до 1000 для лимита изображений.",

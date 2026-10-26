@@ -89,7 +89,10 @@ export function openAiCompatibleModel(
     reasoning,
     compat: {
       supportsDeveloperRole: false,
-      supportsReasoningEffort: overrides?.supportsReasoningEffort ?? reasoning,
+      // Generic servers often reject the OpenAI-only reasoning_effort field, so
+      // "Supports thinking" only enables reasoning parsing there; sending the
+      // effort is an explicit per-credential opt-in.
+      supportsReasoningEffort: overrides?.supportsReasoningEffort ?? (official ? reasoning : false),
       thinkingFormat: "openai",
       // pi-ai's URL detection treats unknown hosts as OpenAI proper
       // (max_completion_tokens, store, long cache retention). Generic servers

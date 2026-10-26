@@ -18,6 +18,9 @@ import {
   applyProbedContextWindow,
   COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
+  compatibleCompatInput,
+  compatibleSendsReasoningEffort,
+  compatibleStreamsUsage,
   contextWindowFieldValue,
   createModelProbe,
   filterModelCatalog,
@@ -104,6 +107,8 @@ export function ModelSettingsOverlay({
   const [gatewayId, setGatewayId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [reasoning, setReasoning] = useState(false);
+  const [sendReasoningEffort, setSendReasoningEffort] = useState(false);
+  const [streamUsage, setStreamUsage] = useState(true);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
   const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
   const [contextWindow, setContextWindowState] = useState("");
@@ -196,6 +201,10 @@ export function ModelSettingsOverlay({
       setBaseUrl(nextCredential?.baseUrl ?? "");
       if (nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID) {
         setReasoning(nextCredential?.reasoning ?? false);
+        setSendReasoningEffort(
+          compatibleSendsReasoningEffort(nextCredential?.baseUrl, nextCredential?.compat),
+        );
+        setStreamUsage(compatibleStreamsUsage(nextCredential?.compat));
         setThinkingLevel(
           clampCatalogThinkingLevel(
             nextCredential?.modelId === nextModel ? nextCredential?.thinkingLevel : null,
@@ -322,7 +331,9 @@ export function ModelSettingsOverlay({
   // default — only when the active model can actually think.
   const activeThinkingLabel =
     (currentEntry?.thinkingLevels ?? []).some((level) => level !== "off") ||
-    activeCredential?.reasoning
+    (activeCredential?.reasoning &&
+      (activeCredential.provider !== OPENAI_COMPATIBLE_PROVIDER_ID ||
+        compatibleSendsReasoningEffort(activeCredential.baseUrl, activeCredential.compat)))
       ? thinkingLevelLabel(activeCredential?.thinkingLevel ?? "medium")
       : null;
   const isActive =
@@ -416,6 +427,10 @@ export function ModelSettingsOverlay({
         : pickCatalogModelId(catalog, nextProvider, nextCredential?.modelId ?? me?.defaultModel);
     setProvider(nextProvider);
     setReasoning(nextCredential?.reasoning ?? false);
+    setSendReasoningEffort(
+      compatibleSendsReasoningEffort(nextCredential?.baseUrl, nextCredential?.compat),
+    );
+    setStreamUsage(compatibleStreamsUsage(nextCredential?.compat));
     const nextEntry = catalog.find(
       (entry) => entry.provider === nextProvider && entry.id === nextModelId,
     );
@@ -647,6 +662,13 @@ export function ModelSettingsOverlay({
               contextWindow: parsedContextWindow,
               supportsImages,
               maxImagesPerPrompt: maxImagesPerPromptInput,
+              compat: compatibleCompatInput({
+                baseUrl: effectiveBaseUrl,
+                reasoning,
+                sendReasoningEffort,
+                streamUsage,
+                previous: credential?.compat,
+              }),
               apiKey: apiKey.trim() || undefined,
               label: selected.providerName ?? selected.provider,
             }
@@ -1391,6 +1413,12 @@ export function ModelSettingsOverlay({
                     onReasoningChange={(value) => {
                       selectionRevisionRef.current += 1;
                       setReasoning(value);
+                      if (value && credential?.compat?.supportsReasoningEffort === undefined) {
+                        // Only the official API takes reasoning_effort by default.
+                        setSendReasoningEffort(
+                          compatibleSendsReasoningEffort(effectiveBaseUrl, undefined),
+                        );
+                      }
                       if (!value) setThinkingLevel(null);
                       setNotice(null);
                     }}
@@ -1447,6 +1475,20 @@ export function ModelSettingsOverlay({
                       setNotice(null);
                     }}
                     maxImagesLabel={t`Maximum images per request`}
+                    sendReasoningEffort={sendReasoningEffort}
+                    onSendReasoningEffortChange={(value) => {
+                      selectionRevisionRef.current += 1;
+                      setSendReasoningEffort(value);
+                      setNotice(null);
+                    }}
+                    sendReasoningEffortLabel={t`Send reasoning_effort`}
+                    streamUsage={streamUsage}
+                    onStreamUsageChange={(value) => {
+                      selectionRevisionRef.current += 1;
+                      setStreamUsage(value);
+                      setNotice(null);
+                    }}
+                    streamUsageLabel={t`Send stream_options (usage reporting)`}
                   />
                 </div>
               ) : null}

@@ -3982,9 +3982,19 @@ msgstr "Отправить код удаления"
 msgid "Send it"
 msgstr "Отправить"
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send reasoning_effort"
+msgstr "Отправлять reasoning_effort"
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Отправить ссылку для сброса"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send stream_options (usage reporting)"
+msgstr "Отправлять stream_options (учёт использования)"
 
 #: src/components/AskCard.tsx
 msgid "Sending…"

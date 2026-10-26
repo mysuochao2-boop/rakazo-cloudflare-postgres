@@ -2,9 +2,13 @@ import type { ModelCatalogEntry } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   clampCatalogThinkingLevel,
+  compatibleCompatInput,
+  compatibleSendsReasoningEffort,
+  compatibleStreamsUsage,
   connectedModelChoices,
   featuredModelProviders,
   filterModelCatalog,
+  isOfficialOpenAiBaseUrl,
   pickCatalogModelId,
   resolveSelectableModelId,
   selectedProviderOutsideSearchResults,
@@ -276,5 +280,47 @@ describe("filterModelCatalog", () => {
 
   it("returns nothing when no model matches", () => {
     expect(filterModelCatalog(models, "gemini")).toEqual([]);
+  });
+});
+
+describe("OpenAI-compatible compat form helpers", () => {
+  const generic = "https://muse.example.test/v1";
+  const official = "https://api.openai.com/v1";
+
+  it("only sends reasoning_effort by default on the official host", () => {
+    expect(isOfficialOpenAiBaseUrl(official)).toBe(true);
+    expect(isOfficialOpenAiBaseUrl(generic)).toBe(false);
+    expect(compatibleSendsReasoningEffort(generic, undefined)).toBe(false);
+    expect(compatibleSendsReasoningEffort(official, undefined)).toBe(true);
+    expect(compatibleSendsReasoningEffort(generic, { supportsReasoningEffort: true })).toBe(true);
+    expect(compatibleStreamsUsage(undefined)).toBe(true);
+    expect(compatibleStreamsUsage({ supportsUsageInStreaming: false })).toBe(false);
+  });
+
+  it("stores only non-default overrides and clears with null", () => {
+    const base = { reasoning: true, sendReasoningEffort: false, streamUsage: true };
+    expect(compatibleCompatInput({ ...base, baseUrl: generic })).toBeNull();
+    expect(compatibleCompatInput({ ...base, baseUrl: generic, sendReasoningEffort: true })).toEqual(
+      { supportsReasoningEffort: true },
+    );
+    expect(compatibleCompatInput({ ...base, baseUrl: official })).toEqual({
+      supportsReasoningEffort: false,
+    });
+    expect(
+      compatibleCompatInput({
+        ...base,
+        baseUrl: generic,
+        reasoning: false,
+        sendReasoningEffort: true,
+      }),
+    ).toBeNull();
+    expect(
+      compatibleCompatInput({
+        ...base,
+        baseUrl: generic,
+        streamUsage: false,
+        previous: { maxTokensField: "max_completion_tokens" },
+      }),
+    ).toEqual({ maxTokensField: "max_completion_tokens", supportsUsageInStreaming: false });
   });
 });

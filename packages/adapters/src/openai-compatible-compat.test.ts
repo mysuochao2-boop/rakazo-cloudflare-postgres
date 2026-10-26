@@ -5,7 +5,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { ModelConnectInputSchema } from "@rakazo/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildModelConnectPlaintext } from "./model-connect.js";
+import { buildModelConnectPlaintext, modelCredentialDto } from "./model-connect.js";
 import { parseModelSecret } from "./pi-oauth.js";
 import {
   openAiCompatibleModel,
@@ -93,13 +93,34 @@ describe("OpenAI-compatible custom baseUrl wire compat", () => {
     expect(body).not.toHaveProperty("reasoning_effort");
   });
 
-  it("omits reasoning_effort when reasoning is on but thinking is off, and keeps explicit efforts", async () => {
+  it("does not send reasoning_effort to a generic server by default, even with reasoning on", async () => {
     const bodies: Body[] = [];
     const baseUrl = await startServer(bodies);
     await runAgainst(baseUrl, { reasoning: true });
     await runAgainst(baseUrl, { reasoning: true }, "high");
     expect(bodies[0]).not.toHaveProperty("reasoning_effort");
-    expect(bodies[1]?.reasoning_effort).toBe("high");
+    expect(bodies[1]).not.toHaveProperty("reasoning_effort");
+    expect(bodies[1]?.stream_options).toEqual({ include_usage: true });
+  });
+
+  it("sends reasoning_effort only when the credential explicitly opts in", async () => {
+    const bodies: Body[] = [];
+    const baseUrl = await startServer(bodies);
+    const compat = { supportsReasoningEffort: true };
+    await runAgainst(baseUrl, { reasoning: true, compat }, "high");
+    await runAgainst(baseUrl, { reasoning: true, compat });
+    await runAgainst(baseUrl, { reasoning: false, compat }, "high");
+    expect(bodies[0]?.reasoning_effort).toBe("high");
+    expect(bodies[1]).not.toHaveProperty("reasoning_effort");
+    expect(bodies[2]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("omits stream_options when usage streaming is disabled", async () => {
+    const bodies: Body[] = [];
+    const baseUrl = await startServer(bodies);
+    await runAgainst(baseUrl, { compat: { supportsUsageInStreaming: false } });
+    expect(bodies[0]).not.toHaveProperty("stream_options");
+    expect(bodies[0]?.max_tokens).toBe(4096);
   });
 
   it("applies whitelisted credential compat overrides", async () => {
@@ -146,6 +167,16 @@ describe("OpenAI-compatible custom baseUrl wire compat", () => {
     expect(body).not.toHaveProperty("max_tokens");
     expect(body?.store).toBe(false);
     expect(body?.reasoning_effort).toBe("none");
+
+    const effortStream = api.streamSimple(
+      model,
+      context as Parameters<typeof api.streamSimple>[1],
+      { apiKey: "test-key", maxTokens: 4096, reasoning: "high", fetch: mockFetch },
+    );
+    for await (const _event of effortStream) {
+      // drain
+    }
+    expect(body?.reasoning_effort).toBe("high");
   });
 });
 
@@ -178,6 +209,23 @@ describe("OpenAI-compatible compat persistence", () => {
       ),
     );
     expect(cleared.kind === "openai_compatible" && cleared.compat).toBeUndefined();
+  });
+
+  it("echoes stored compat on the credential DTO", () => {
+    const plaintext = buildModelConnectPlaintext({
+      provider: "openai-compatible",
+      baseUrl,
+      modelId,
+      reasoning: true,
+      compat: { supportsReasoningEffort: true, supportsUsageInStreaming: false },
+    });
+    const row = { id: "c1", provider: "openai-compatible", label: "x", isDefault: true };
+    expect(modelCredentialDto({ ...row, defaultModel: modelId }, plaintext).compat).toEqual({
+      supportsReasoningEffort: true,
+      supportsUsageInStreaming: false,
+    });
+    const plain = buildModelConnectPlaintext({ provider: "openai-compatible", baseUrl, modelId });
+    expect(modelCredentialDto(row, plain)).not.toHaveProperty("compat");
   });
 
   it("rejects non-whitelisted compat fields at the connect boundary", () => {

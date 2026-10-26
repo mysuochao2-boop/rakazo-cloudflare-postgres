@@ -21,6 +21,9 @@ import {
   applyProbedContextWindow,
   COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
+  compatibleCompatInput,
+  compatibleSendsReasoningEffort,
+  compatibleStreamsUsage,
   contextWindowFieldValue,
   createModelProbe,
   featuredModelProviders,
@@ -125,6 +128,8 @@ export default function Models() {
   const [gatewayId, setGatewayId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [reasoning, setReasoning] = useState(false);
+  const [sendReasoningEffort, setSendReasoningEffort] = useState(false);
+  const [streamUsage, setStreamUsage] = useState(true);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
   const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
   // New connections start empty: the user (or /models) supplies the model's real window.
@@ -252,6 +257,10 @@ export default function Models() {
     setBaseUrl(nextCredential?.baseUrl ?? "");
     if (nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID) {
       setReasoning(nextCredential?.reasoning ?? false);
+      setSendReasoningEffort(
+        compatibleSendsReasoningEffort(nextCredential?.baseUrl, nextCredential?.compat),
+      );
+      setStreamUsage(compatibleStreamsUsage(nextCredential?.compat));
       setThinkingLevel(
         clampCatalogThinkingLevel(
           nextCredential?.modelId === nextModel ? nextCredential?.thinkingLevel : null,
@@ -468,7 +477,9 @@ export default function Models() {
   // default — only when the active model can actually think.
   const activeThinkingLabel =
     (currentEntry?.thinkingLevels ?? []).some((level) => level !== "off") ||
-    activeCredential?.reasoning
+    (activeCredential?.reasoning &&
+      (activeCredential.provider !== OPENAI_COMPATIBLE_PROVIDER_ID ||
+        compatibleSendsReasoningEffort(activeCredential.baseUrl, activeCredential.compat)))
       ? thinkingLevelLabel(activeCredential?.thinkingLevel ?? "medium", t)
       : null;
   const isActive =
@@ -523,6 +534,10 @@ export default function Models() {
     setProvider(nextProvider);
     setModelSearch({ provider: nextProvider, query: "" });
     setReasoning(nextCredential?.reasoning ?? false);
+    setSendReasoningEffort(
+      compatibleSendsReasoningEffort(nextCredential?.baseUrl, nextCredential?.compat),
+    );
+    setStreamUsage(compatibleStreamsUsage(nextCredential?.compat));
     const nextEntry = catalog.find(
       (entry) => entry.provider === nextProvider && entry.id === nextModelId,
     );
@@ -760,6 +775,13 @@ export default function Models() {
               contextWindow: parsedContextWindow,
               supportsImages,
               maxImagesPerPrompt: maxImagesPerPromptInput,
+              compat: compatibleCompatInput({
+                baseUrl: effectiveBaseUrl,
+                reasoning,
+                sendReasoningEffort,
+                streamUsage,
+                previous: credential?.compat,
+              }),
               apiKey: apiKey.trim() || undefined,
               label: selected.providerName ?? selected.provider,
             }
@@ -1053,12 +1075,27 @@ export default function Models() {
                 value={reasoning}
                 onValueChange={(value) => {
                   setReasoning(value);
+                  if (value && credential?.compat?.supportsReasoningEffort === undefined) {
+                    // Only the official API takes reasoning_effort by default.
+                    setSendReasoningEffort(
+                      compatibleSendsReasoningEffort(effectiveBaseUrl, undefined),
+                    );
+                  }
                   if (!value) setThinkingLevel(null);
                 }}
                 disabled={busy}
               />
             </View>
-            {reasoning ? (
+            <View style={styles.modelRow}>
+              <Text style={styles.modelLabel}>{t("Send reasoning_effort")}</Text>
+              <NativeSwitch
+                accessibilityLabel={t("Send reasoning_effort")}
+                value={reasoning && sendReasoningEffort}
+                onValueChange={setSendReasoningEffort}
+                disabled={busy || !reasoning}
+              />
+            </View>
+            {reasoning && sendReasoningEffort ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t("Reasoning effort")}
@@ -1088,12 +1125,21 @@ export default function Models() {
                 <Text style={styles.rowValue}>{reasoningEffortValue}</Text>
               </Pressable>
             ) : null}
-            <View style={[styles.modelRow, styles.singleRow]}>
+            <View style={styles.modelRow}>
               <Text style={styles.modelLabel}>{t("Supports images")}</Text>
               <NativeSwitch
                 accessibilityLabel={t("Supports images")}
                 value={supportsImages}
                 onValueChange={setSupportsImages}
+                disabled={busy}
+              />
+            </View>
+            <View style={[styles.modelRow, styles.singleRow]}>
+              <Text style={styles.modelLabel}>{t("Send stream_options (usage reporting)")}</Text>
+              <NativeSwitch
+                accessibilityLabel={t("Send stream_options (usage reporting)")}
+                value={streamUsage}
+                onValueChange={setStreamUsage}
                 disabled={busy}
               />
             </View>

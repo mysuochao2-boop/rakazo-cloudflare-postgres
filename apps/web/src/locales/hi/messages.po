@@ -3982,9 +3982,19 @@ msgstr "हटाने का कोड भेजें"
 msgid "Send it"
 msgstr "इसे भेजें"
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send reasoning_effort"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "रीसेट लिंक भेजें"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send stream_options (usage reporting)"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Sending…"

@@ -286,6 +286,7 @@ export function modelCredentialDto(
         : compatibleCredential.supportsImages,
     baseUrl: parsed.baseUrl,
     reasoning: parsed.reasoning ?? false,
+    ...(parsed.compat ? { compat: parsed.compat } : {}),
     ...(credential.thinkingLevel !== undefined || parsed.thinkingLevel !== undefined
       ? { thinkingLevel: credential.thinkingLevel ?? parsed.thinkingLevel }
       : {}),

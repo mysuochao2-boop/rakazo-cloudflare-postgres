@@ -30,6 +30,12 @@ export function ModelThinkingOptions({
   contextWindowRequired = false,
   imagesLabel,
   maxImagesLabel,
+  sendReasoningEffort,
+  onSendReasoningEffortChange,
+  sendReasoningEffortLabel,
+  streamUsage,
+  onStreamUsageChange,
+  streamUsageLabel,
 }: {
   reasoning?: boolean;
   onReasoningChange?: (reasoning: boolean) => void;
@@ -59,6 +65,14 @@ export function ModelThinkingOptions({
   contextWindowRequired?: boolean;
   imagesLabel?: string;
   maxImagesLabel?: string;
+  /** Sub-option of thinking: send the OpenAI reasoning_effort request field. */
+  sendReasoningEffort?: boolean;
+  onSendReasoningEffortChange?: (sendReasoningEffort: boolean) => void;
+  sendReasoningEffortLabel?: string;
+  /** Send stream_options so the server reports usage while streaming. */
+  streamUsage?: boolean;
+  onStreamUsageChange?: (streamUsage: boolean) => void;
+  streamUsageLabel?: string;
 }) {
   const id = useId();
   const thinkingLevelId = useId();
@@ -66,6 +80,9 @@ export function ModelThinkingOptions({
   const contextWindowId = useId();
   const imagesId = useId();
   const maxImagesId = useId();
+  const sendEffortId = useId();
+  const streamUsageId = useId();
+  const effortControlled = onSendReasoningEffortChange !== undefined;
   const contextWindowHintId = useId();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const contextWindowMissing =
@@ -88,8 +105,20 @@ export function ModelThinkingOptions({
           {thinkingLabel}
         </label>
       ) : null}
+      {showThinking && effortControlled && sendReasoningEffortLabel ? (
+        <label htmlFor={sendEffortId} className="mt-3 ml-6 flex items-center gap-2">
+          <Checkbox
+            id={sendEffortId}
+            checked={reasoning && sendReasoningEffort === true}
+            onCheckedChange={(checked) => onSendReasoningEffortChange(checked === true)}
+            disabled={disabled || !reasoning}
+          />
+          {sendReasoningEffortLabel}
+        </label>
+      ) : null}
       {showThinking &&
       reasoning &&
+      (!effortControlled || sendReasoningEffort === true) &&
       onThinkingLevelChange &&
       thinkingLevelOptions &&
       thinkingLevelOptions.length > 0 ? (
@@ -159,6 +188,17 @@ export function ModelThinkingOptions({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {onStreamUsageChange && streamUsageLabel ? (
+        <label htmlFor={streamUsageId} className="mt-3 flex items-center gap-2">
+          <Checkbox
+            id={streamUsageId}
+            checked={streamUsage !== false}
+            onCheckedChange={(checked) => onStreamUsageChange(checked === true)}
+            disabled={disabled}
+          />
+          {streamUsageLabel}
+        </label>
       ) : null}
       {onSupportsImagesChange ? (
         <label htmlFor={imagesId} className="mt-3 flex items-center gap-2">

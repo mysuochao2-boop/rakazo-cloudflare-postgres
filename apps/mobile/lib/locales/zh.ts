@@ -563,6 +563,8 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Enter a whole number from 1 to {max} for the context limit.":
     "请输入 1 到 {max} 之间的整数作为上下文限制。",
   "Supports images": "支持图像",
+  "Send reasoning_effort": "发送 reasoning_effort",
+  "Send stream_options (usage reporting)": "发送 stream_options（用量统计）",
   "Maximum images per request": "每次请求的最大图像数",
   "Enter a whole number from 1 to 1000 for the image limit.":
     "请输入 1 到 1000 之间的整数作为图像限制。",

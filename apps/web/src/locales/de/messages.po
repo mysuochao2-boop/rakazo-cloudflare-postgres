@@ -3982,9 +3982,19 @@ msgstr "Löschcode senden"
 msgid "Send it"
 msgstr "Senden"
 
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send reasoning_effort"
+msgstr "reasoning_effort senden"
+
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Link zum Zurücksetzen senden"
+
+#: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+msgid "Send stream_options (usage reporting)"
+msgstr "stream_options senden (Nutzungsberichte)"
 
 #: src/components/AskCard.tsx
 msgid "Sending…"

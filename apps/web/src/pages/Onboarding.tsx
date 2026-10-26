@@ -18,8 +18,10 @@ import {
   applyProbedContextWindow,
   COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
+  compatibleCompatInput,
   createModelProbe,
   initialModelProbeState,
+  isOfficialOpenAiBaseUrl,
   pickCatalogModelId,
   probedContextWindow,
 } from "@rakazo/core";
@@ -142,6 +144,8 @@ export function OnboardingPage() {
   const [gatewayId, setGatewayId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [reasoning, setReasoning] = useState(false);
+  const [sendReasoningEffort, setSendReasoningEffort] = useState(false);
+  const [streamUsage, setStreamUsage] = useState(true);
   const [manualModelId, setManualModelId] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
   const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
@@ -336,6 +340,8 @@ export function OnboardingPage() {
     );
     setBaseUrl("");
     setReasoning(false);
+    setSendReasoningEffort(false);
+    setStreamUsage(true);
     setThinkingLevel(null);
     setManualModelId(false);
     setSupportsImages(false);
@@ -518,6 +524,12 @@ export function OnboardingPage() {
           contextWindow: parsedContextWindow,
           supportsImages,
           maxImagesPerPrompt: maxImagesPerPromptInput,
+          compat: compatibleCompatInput({
+            baseUrl: baseUrl.trim(),
+            reasoning,
+            sendReasoningEffort,
+            streamUsage,
+          }),
           apiKey: apiKey.trim() || undefined,
           label: selected?.providerName ?? provider,
         });
@@ -722,6 +734,8 @@ export function OnboardingPage() {
                     reasoning={reasoning}
                     onReasoningChange={(value) => {
                       setReasoning(value);
+                      // Only the official API takes reasoning_effort by default.
+                      if (value) setSendReasoningEffort(isOfficialOpenAiBaseUrl(baseUrl));
                       if (!value) setThinkingLevel(null);
                     }}
                     advancedLabel={t`Advanced`}
@@ -758,6 +772,12 @@ export function OnboardingPage() {
                     maxImagesPerPrompt={maxImagesPerPrompt}
                     onMaxImagesPerPromptChange={setMaxImagesPerPrompt}
                     maxImagesLabel={t`Maximum images per request`}
+                    sendReasoningEffort={sendReasoningEffort}
+                    onSendReasoningEffortChange={setSendReasoningEffort}
+                    sendReasoningEffortLabel={t`Send reasoning_effort`}
+                    streamUsage={streamUsage}
+                    onStreamUsageChange={setStreamUsage}
+                    streamUsageLabel={t`Send stream_options (usage reporting)`}
                   />
                 </>
               ) : (
