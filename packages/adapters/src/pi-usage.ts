@@ -17,7 +17,12 @@ import type {
 } from "@rakazo/adapter-kit";
 import type { ContextBudget } from "./context-selection.js";
 import { estimateModelContextTokens } from "./model-context.js";
+import {
+  type ModelTransportLogContext,
+  withModelTransportLogContext,
+} from "./model-transport-log.js";
 import { requestedPiCacheWriteRetention, resolvePiCacheRetention } from "./pi-cache-retention.js";
+import { fetchPairedWithDispatcher } from "./undici-fetch.js";
 
 /** Pi initializes absent usage to zero. Only raw numeric fields can prove reported zero. */
 export type ReportedUsageFields = Set<keyof AgentUsage>;
@@ -84,8 +89,12 @@ export function usageReportingFetch(
   fetcher: typeof fetch,
   reported: ReportedUsageFields,
 ): typeof fetch {
+  // An OpenAI-compatible fetch attaches an undici-package dispatcher that Node's
+  // built-in fetch rejects; pair the transport the same way the provider does.
+  const paired = fetchPairedWithDispatcher(fetcher);
   return async (input, init) => {
-    const response = await fetcher(input, init);
+    const transport = (init as { dispatcher?: unknown } | undefined)?.dispatcher ? paired : fetcher;
+    const response = await transport(input, init);
     if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream"))
       return response;
     let buffer = "";
@@ -217,6 +226,8 @@ export function observedPiStream(
     recordUsage?: (event: Extract<AgentRuntimeEvent, { type: "usage" }>) => void | Promise<void>;
     /** Provider failures only; excludes context, reservations and usage settlement. */
     onProviderError?: (message: AssistantMessage) => void;
+    /** Run identity attached to transport-failure runtime logs. */
+    logContext?: Omit<ModelTransportLogContext, "provider" | "model">;
   },
 ) {
   const stream = createAssistantMessageEventStream();
@@ -277,15 +288,19 @@ export function observedPiStream(
       };
       let upstream: ReturnType<Models["streamSimple"]>;
       try {
-        upstream = models.streamSimple(
-          model,
-          preparedContext,
-          collectRawUsage
-            ? {
-                ...streamOptions,
-                fetch: usageReportingFetch(streamOptions?.fetch ?? globalThis.fetch, reported),
-              }
-            : streamOptions,
+        upstream = withModelTransportLogContext(
+          { ...hooks?.logContext, provider: model.provider, model: model.id },
+          () =>
+            models.streamSimple(
+              model,
+              preparedContext,
+              collectRawUsage
+                ? {
+                    ...streamOptions,
+                    fetch: usageReportingFetch(streamOptions?.fetch ?? globalThis.fetch, reported),
+                  }
+                : streamOptions,
+            ),
         );
       } catch (error) {
         providerThrew = true;
