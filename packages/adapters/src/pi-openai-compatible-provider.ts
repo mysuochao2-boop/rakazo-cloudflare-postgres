@@ -8,7 +8,11 @@ import {
   type ProviderStreams,
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { DEFAULT_MODEL_CONTEXT_WINDOW, DEFAULT_MODEL_MAX_TOKENS } from "@rakazo/contracts";
+import {
+  DEFAULT_MODEL_CONTEXT_WINDOW,
+  DEFAULT_MODEL_MAX_TOKENS,
+  type OpenAiCompatibleCompat,
+} from "@rakazo/contracts";
 import { Agent } from "undici";
 import { declaredVisionModelIds, inputModalities } from "./model-modalities.js";
 import { reportModelTransportError } from "./model-transport-log.js";
@@ -58,6 +62,14 @@ const OPENAI_COMPAT_BASE = "http://127.0.0.1:1/v1";
 const resolveHostname: ResolveHostname = (hostname) =>
   lookup(hostname, { all: true, verbatim: true });
 
+function isOfficialOpenAiBaseUrl(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
 export function openAiCompatibleModel(
   id: string,
   baseUrl: string,
@@ -65,7 +77,9 @@ export function openAiCompatibleModel(
   acceptsImages = false,
   maxTokens = DEFAULT_MODEL_MAX_TOKENS,
   contextWindow = DEFAULT_MODEL_CONTEXT_WINDOW,
+  overrides?: OpenAiCompatibleCompat,
 ): Model<"openai-completions"> {
+  const official = isOfficialOpenAiBaseUrl(baseUrl);
   return {
     id,
     name: id,
@@ -75,10 +89,27 @@ export function openAiCompatibleModel(
     reasoning,
     compat: {
       supportsDeveloperRole: false,
-      supportsReasoningEffort: reasoning,
+      supportsReasoningEffort: overrides?.supportsReasoningEffort ?? reasoning,
       thinkingFormat: "openai",
+      // pi-ai's URL detection treats unknown hosts as OpenAI proper
+      // (max_completion_tokens, store, long cache retention). Generic servers
+      // such as vLLM/LiteLLM-style gateways reject those, so only the official
+      // host keeps them.
+      ...(official
+        ? {}
+        : {
+            maxTokensField: "max_tokens" as const,
+            supportsStore: false,
+            supportsLongCacheRetention: false,
+          }),
+      ...(overrides?.maxTokensField ? { maxTokensField: overrides.maxTokensField } : {}),
+      ...(overrides?.supportsUsageInStreaming !== undefined
+        ? { supportsUsageInStreaming: overrides.supportsUsageInStreaming }
+        : {}),
     },
-    thinkingLevelMap: { off: "none" },
+    // Thinking "off" omits reasoning_effort on generic servers; only the
+    // official API understands the explicit "none" effort.
+    ...(official ? { thinkingLevelMap: { off: "none" } } : {}),
     input: inputModalities(acceptsImages),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,
@@ -314,6 +345,7 @@ export function registerOpenAiCompatibleRuntime(
     acceptsImages?: boolean;
     maxTokens?: number;
     contextWindow?: number;
+    compat?: OpenAiCompatibleCompat;
   },
 ): MutableModels {
   const baseUrl = normalizeOpenAiCompatibleBaseUrl(opts.baseUrl);
@@ -328,6 +360,7 @@ export function registerOpenAiCompatibleRuntime(
         acceptsImages,
         opts.maxTokens,
         opts.contextWindow,
+        opts.compat,
       ),
     ]),
   );

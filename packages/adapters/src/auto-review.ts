@@ -277,6 +277,7 @@ export async function runAutoReviewJudge(input: {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  compat?: AgentRunModel["compat"];
   oauth?: AgentRunModel["oauth"];
   prompt: string;
   runId: string;
@@ -322,6 +323,7 @@ export async function runAutoReviewJudge(input: {
           contextWindow: input.contextWindow,
           maxTokens: input.maxTokens,
           reasoning: input.reasoning,
+          compat: input.compat,
           oauth: input.oauth,
         },
       },
@@ -373,6 +375,7 @@ export type LlmAutoReviewOptions = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  compat?: AgentRunModel["compat"];
   oauth?: AgentRunModel["oauth"];
   runId: string;
   spaceId: string;

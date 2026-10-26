@@ -3075,6 +3075,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       contextWindow: resolved.contextWindow,
 
       reasoning: resolved.reasoning,
+      compat: resolved.compat,
       maxTokens: resolved.maxTokens,
       acceptsImages: resolved.acceptsImages,
       maxImagesPerPrompt: resolved.maxImagesPerPrompt,
@@ -3155,6 +3156,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         contextWindow: resolved.contextWindow,
 
         reasoning: resolved.reasoning,
+        compat: resolved.compat,
         maxTokens: resolved.maxTokens,
         acceptsImages: resolved.acceptsImages,
         maxImagesPerPrompt: resolved.maxImagesPerPrompt,
@@ -4543,6 +4545,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       contextWindow: judgeKey.contextWindow,
                       maxTokens: judgeKey.maxTokens,
                       reasoning: judgeKey.reasoning,
+                      compat: judgeKey.compat,
                       oauth: judgeKey.oauth
                         ? {
                             credential: judgeKey.oauth,
@@ -6714,6 +6717,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 contextWindow: resolved.contextWindow,
 
                 reasoning: resolved.reasoning,
+                compat: resolved.compat,
                 maxTokens: resolved.maxTokens,
                 acceptsImages: resolved.acceptsImages,
                 maxImagesPerPrompt: resolved.maxImagesPerPrompt,
@@ -8678,6 +8682,7 @@ async function resolveModelKey(
   cacheCapabilities?: AgentRunRequest["model"]["cacheCapabilities"];
   contextWindow?: number;
   reasoning?: boolean;
+  compat?: AgentRunRequest["model"]["compat"];
   maxTokens?: number;
   thinkingLevel?: AgentRunRequest["model"]["thinkingLevel"];
   acceptsImages?: boolean;
@@ -8779,6 +8784,7 @@ async function resolveModelKey(
         contextWindow: resolved.secret.kind !== "oauth" ? resolved.secret.contextWindow : undefined,
         reasoning:
           resolved.secret.kind === "openai_compatible" ? resolved.secret.reasoning : undefined,
+        compat: resolved.secret.kind === "openai_compatible" ? resolved.secret.compat : undefined,
         maxTokens: resolved.secret.maxTokens,
         thinkingLevel:
           resolved.secret.kind === "openai_compatible" ? resolved.secret.thinkingLevel : undefined,

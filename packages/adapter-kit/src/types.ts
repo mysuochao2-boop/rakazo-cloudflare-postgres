@@ -1,6 +1,7 @@
 import type {
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
+  OpenAiCompatibleCompat,
   SandboxKind,
 } from "@rakazo/contracts";
 
@@ -415,6 +416,8 @@ export interface AgentRunModel {
   baseUrl?: string;
   /** Whether this custom connection accepts standard reasoning_effort. */
   reasoning?: boolean;
+  /** Whitelisted OpenAI-compatible wire overrides stored with the connection. */
+  compat?: OpenAiCompatibleCompat;
   /** Whether this custom connection accepts image input. */
   acceptsImages?: boolean;
   /** Maximum number of image inputs the model connection accepts in one request. */

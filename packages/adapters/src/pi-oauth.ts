@@ -15,12 +15,14 @@ import type {
   ModelContextLimits,
   ModelOAuthBegin,
   ModelOAuthSignInMode,
+  OpenAiCompatibleCompat,
   ThinkingLevel,
 } from "@rakazo/contracts";
 import {
   MAX_MODEL_CONTEXT_WINDOW,
   MAX_MODEL_MAX_TOKENS,
   ModelContextLimitsSchema,
+  OpenAiCompatibleCompatSchema,
   ThinkingLevelSchema,
 } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
@@ -255,6 +257,25 @@ export function isRetiredModelCredentialError(error: unknown): boolean {
 
 export type StoredModelLimits = ModelContextLimits;
 
+/** Keep only whitelisted, well-typed compat fields; drop empty results. */
+export function parseOpenAiCompatibleCompat(value: unknown): OpenAiCompatibleCompat | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const shape = OpenAiCompatibleCompatSchema.shape;
+  const source = value as Record<string, unknown>;
+  const compat: OpenAiCompatibleCompat = {};
+  const maxTokensField = shape.maxTokensField.safeParse(source.maxTokensField);
+  if (maxTokensField.success && maxTokensField.data !== undefined) {
+    compat.maxTokensField = maxTokensField.data;
+  }
+  if (typeof source.supportsUsageInStreaming === "boolean") {
+    compat.supportsUsageInStreaming = source.supportsUsageInStreaming;
+  }
+  if (typeof source.supportsReasoningEffort === "boolean") {
+    compat.supportsReasoningEffort = source.supportsReasoningEffort;
+  }
+  return Object.keys(compat).length > 0 ? compat : undefined;
+}
+
 function modelLimits(value: Record<string, unknown>): StoredModelLimits {
   const cache = ModelContextLimitsSchema.shape.cacheCapabilities.safeParse(value.cacheCapabilities);
   const window = ModelContextLimitsSchema.shape.contextWindow.safeParse(value.contextWindow);
@@ -284,6 +305,8 @@ export type StoredModelSecret =
       contextWindow?: number;
       visionModelIds?: string[];
       maxImagesPerPrompt?: number;
+      /** Whitelisted wire overrides; absent fields keep host-derived defaults. */
+      compat?: OpenAiCompatibleCompat;
     } & StoredModelLimits);
 
 export type PiOAuthConnected = {
@@ -411,6 +434,7 @@ export function parseModelSecret(plaintext: string): StoredModelSecret {
       parsed.maxImagesPerPrompt <= 1000
         ? parsed.maxImagesPerPrompt
         : undefined;
+    const compat = parseOpenAiCompatibleCompat(parsed.compat);
     return {
       kind: "openai_compatible",
       baseUrl: parsed.baseUrl.trim(),
@@ -421,6 +445,7 @@ export function parseModelSecret(plaintext: string): StoredModelSecret {
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       ...(visionModelIds ? { visionModelIds } : {}),
       ...(maxImagesPerPrompt !== undefined ? { maxImagesPerPrompt } : {}),
+      ...(compat ? { compat } : {}),
       ...modelLimits(parsed),
     };
   }
@@ -485,6 +510,7 @@ export function serializeModelSecret(secret: StoredModelSecret): string {
       ...(secret.maxImagesPerPrompt !== undefined
         ? { maxImagesPerPrompt: secret.maxImagesPerPrompt }
         : {}),
+      ...(secret.compat ? { compat: secret.compat } : {}),
     });
   }
   if (
