@@ -37,7 +37,8 @@ describe.skipIf(!enabled)("unfinished broad history search", () => {
         steps: [
           {
             expect(request) {
-              expect(request).toMatchObject({ max_completion_tokens: 4096 });
+              expect(request).toMatchObject({ max_tokens: 4096 });
+              expect(request).not.toHaveProperty("max_completion_tokens");
               expect(JSON.stringify(request.messages)).toContain(
                 "call search_history with those arguments",
               );

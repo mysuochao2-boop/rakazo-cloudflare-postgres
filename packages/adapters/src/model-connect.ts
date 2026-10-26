@@ -13,6 +13,7 @@ import { modelCredentialAuthKind } from "./pi-catalog-availability.js";
 import {
   CHATGPT_OAUTH_PROVIDER,
   parseModelSecret,
+  parseOpenAiCompatibleCompat,
   type StoredModelSecret,
   serializeModelSecret,
 } from "./pi-oauth.js";
@@ -86,6 +87,11 @@ export function buildModelConnectPlaintext(
       (input.supportsImages !== undefined || previousVisionModelIds !== undefined);
     const compatibleCacheCapabilities =
       input.cacheCapabilities ?? compatiblePrevious?.cacheCapabilities;
+    // null clears; omitted keeps the stored overrides for the same endpoint.
+    const compat =
+      input.compat === null
+        ? undefined
+        : parseOpenAiCompatibleCompat(input.compat ?? compatiblePrevious?.compat);
     const secret: StoredModelSecret = {
       kind: "openai_compatible",
       baseUrl: prepared.baseUrl,
@@ -99,6 +105,7 @@ export function buildModelConnectPlaintext(
       ...(prepared.apiKey ? { apiKey: prepared.apiKey } : {}),
       ...(includeVisionModelIds ? { visionModelIds } : {}),
       ...(maxImagesPerPrompt !== undefined ? { maxImagesPerPrompt } : {}),
+      ...(compat ? { compat } : {}),
     };
     return serializeModelSecret(secret);
   }

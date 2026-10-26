@@ -1096,6 +1096,19 @@ export const ModelBackupListSchema = z
 
 export const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible";
 
+/**
+ * Whitelisted per-connection wire overrides for OpenAI-compatible endpoints.
+ * Absent fields keep the host-derived defaults.
+ */
+export const OpenAiCompatibleCompatSchema = z
+  .object({
+    maxTokensField: z.enum(["max_tokens", "max_completion_tokens"]).optional(),
+    supportsUsageInStreaming: z.boolean().optional(),
+    supportsReasoningEffort: z.boolean().optional(),
+  })
+  .strict();
+export type OpenAiCompatibleCompat = z.infer<typeof OpenAiCompatibleCompatSchema>;
+
 export const ModelConnectInputSchema = z
   .object({
     ...ModelContextLimitsSchema.shape,
@@ -1111,6 +1124,8 @@ export const ModelConnectInputSchema = z
     maxTokens: z.number().int().min(1).max(MAX_MODEL_MAX_TOKENS).nullable().optional(),
     supportsImages: z.boolean().optional(),
     maxImagesPerPrompt: z.number().int().min(1).max(1000).nullable().optional(),
+    /** OpenAI-compatible only; null clears stored overrides. */
+    compat: OpenAiCompatibleCompatSchema.nullable().optional(),
   })
   .superRefine((value, ctx) => {
     if (!modelOutputLeavesInputRoom(value.maxTokens, value.contextWindow)) {

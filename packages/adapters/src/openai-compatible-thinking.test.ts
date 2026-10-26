@@ -118,9 +118,9 @@ describe("OpenAI-compatible standard thinking transport", () => {
     expect(payload.max_tokens ?? payload.max_completion_tokens).toBe(8192);
   });
 
-  it("sends none when thinking is off", async () => {
+  it("omits reasoning_effort when thinking is off on a generic server", async () => {
     const { payload } = await capture();
-    expect(payload.reasoning_effort).toBe("none");
+    expect(payload.reasoning_effort).toBeUndefined();
     expect(payload.chat_template_kwargs).toBeUndefined();
   });
 
