@@ -421,3 +421,164 @@ export function closeUnterminatedFence(markdown: string): string {
 
   return openFence ? `${markdown}\n${openFence.marker.repeat(openFence.length)}` : markdown;
 }
+
+/** Largest SVG source, in UTF-8 bytes, that renders as an image. Larger SVG shows as source. */
+export const MAX_INLINE_SVG_BYTES = 512 * 1024;
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+// One standalone SVG document: an optional XML declaration, comments and an internal-subset-free
+// doctype, then a single <svg …>…</svg> root. Anything else stays source.
+const svgDocumentPattern =
+  /^(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+svg[^>[]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?=[\s>/])[\s\S]*<\/svg\s*>$/i;
+
+export type InlineSvgImage = {
+  /** A data: URL built here from the source, for an <img> only. */
+  src: string;
+  /** The SVG source, for the source view and downloads. */
+  source: string;
+};
+
+/** Why an SVG source does not render as an image. */
+export function inlineSvgRejection(source: string): "too-large" | "not-svg" | undefined {
+  const value = source.trim();
+  if (utf8ByteLength(value) > MAX_INLINE_SVG_BYTES) return "too-large";
+  return svgDocumentPattern.test(value) ? undefined : "not-svg";
+}
+
+/**
+ * An SVG document as an image source. SVG can carry scripts and event handlers, so it is only
+ * ever drawn through <img src="data:image/svg+xml,…">, where browsers run no script and load no
+ * external resources. It is never inserted into the page as markup.
+ */
+export function svgSourceImage(source: string): InlineSvgImage | undefined {
+  const value = source.trim();
+  if (!value || inlineSvgRejection(value)) return undefined;
+  return { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(value)}`, source: value };
+}
+
+const SVG_DATA_URL_PREFIX = /^data:image\/svg\+xml(?=[;,])/i;
+// Percent-encoding can triple the byte count; reject longer URLs before decoding them.
+const MAX_SVG_DATA_URL_LENGTH = MAX_INLINE_SVG_BYTES * 3 + 256;
+
+function decodeBase64Utf8(value: string): string | undefined {
+  const compact = value.replace(/\s+/g, "");
+  if (!/^[a-z\d+/]*={0,2}$/i.test(compact) || typeof atob !== "function") return undefined;
+  try {
+    const binary = atob(compact);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+/** A markdown image written as data:image/svg+xml (base64, or UTF-8 / percent-encoded). */
+export function inlineSvgDataUrl(url: string): InlineSvgImage | undefined {
+  const value = url.trim();
+  if (value.length > MAX_SVG_DATA_URL_LENGTH || !SVG_DATA_URL_PREFIX.test(value)) return undefined;
+  const comma = value.indexOf(",");
+  if (comma < 0) return undefined;
+  const parameters = value
+    .slice(0, comma)
+    .split(";")
+    .slice(1)
+    .map((parameter) => parameter.trim().toLowerCase());
+  const payload = value.slice(comma + 1);
+  let source: string | undefined;
+  if (parameters.includes("base64")) {
+    source = decodeBase64Utf8(payload);
+  } else {
+    try {
+      source = decodeURIComponent(payload);
+    } catch {
+      // A literal "%" (width="100%") in an unencoded SVG is not an escape.
+      source = payload;
+    }
+  }
+  return source === undefined ? undefined : svgSourceImage(source);
+}
+
+const fenceLinePattern = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const svgBlockStartPattern = /^( {0,3})<svg(?=[\s>/]|$)/i;
+const svgTagPattern = /<svg(?=[\s>/])(?:"[^"]*"|'[^']*'|[^'">])*>|<\/svg\s*>/gi;
+
+/** The end offset of the <svg> element that starts at `start`, or undefined while unclosed. */
+function svgElementEnd(text: string, start: number): number | undefined {
+  svgTagPattern.lastIndex = start;
+  let depth = 0;
+  for (let match = svgTagPattern.exec(text); match; match = svgTagPattern.exec(text)) {
+    const tag = match[0];
+    if (tag.startsWith("</")) depth -= 1;
+    else if (!tag.endsWith("/>")) depth += 1;
+    if (depth <= 0) return match.index + tag.length;
+  }
+  return undefined;
+}
+
+/**
+ * Raw <svg>…</svg> blocks in a reply would be dropped with other HTML. Each complete block that
+ * starts a line outside a code fence becomes a ```svg fence, which renders as an image. Unclosed
+ * blocks (still streaming) and SVG inside code are left as written.
+ */
+export function fenceInlineSvgBlocks(markdown: string): string {
+  if (!/<svg/i.test(markdown)) return markdown;
+  const lines = markdown.split("\n");
+  const output: string[] = [];
+  let openFence: { marker: string; length: number } | undefined;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const fence = line.match(fenceLinePattern);
+    if (openFence) {
+      output.push(line);
+      if (
+        fence?.[1] &&
+        fence[1][0] === openFence.marker &&
+        fence[1].length >= openFence.length &&
+        (fence[2] ?? "").trim() === ""
+      ) {
+        openFence = undefined;
+      }
+      continue;
+    }
+    if (fence?.[1]) {
+      openFence = { marker: fence[1][0]!, length: fence[1].length };
+      output.push(line);
+      continue;
+    }
+    const start = line.match(svgBlockStartPattern);
+    if (!start) {
+      output.push(line);
+      continue;
+    }
+    const rest = lines.slice(index).join("\n");
+    const indent = start[1]!.length;
+    const end = svgElementEnd(rest, indent);
+    if (end === undefined) {
+      output.push(line);
+      continue;
+    }
+    const svg = rest.slice(indent, end);
+    const longestBackticks = Math.max(0, ...(svg.match(/`+/g) ?? []).map((run) => run.length));
+    const marker = "`".repeat(Math.max(3, longestBackticks + 1));
+    output.push(`${marker}svg`, svg, marker);
+    const consumed = rest.slice(0, end).split("\n").length - 1;
+    const tail = rest.slice(end).split("\n")[0] ?? "";
+    if (tail.trim()) output.push(tail);
+    index += consumed;
+  }
+  return output.join("\n");
+}

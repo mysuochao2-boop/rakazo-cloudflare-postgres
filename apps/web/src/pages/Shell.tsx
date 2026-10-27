@@ -6858,6 +6858,7 @@ const MessageView = memo(function MessageView({
                 target={artifactTarget}
                 artifactId={block.artifactId}
                 name={block.name}
+                mimeType={block.mimeType}
               />
             </div>
           );

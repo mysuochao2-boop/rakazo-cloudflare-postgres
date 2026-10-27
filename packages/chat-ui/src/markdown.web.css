@@ -318,3 +318,105 @@ a.rk-chat-link .rk-chat-link-tile > svg {
 a.rk-chat-link:hover .rk-chat-link-label {
   text-decoration-color: currentColor;
 }
+
+.rk-chat-markdown-zoom {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.rk-chat-markdown-zoom:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 0.65em;
+}
+
+/* SVG drawings are often transparent with dark strokes; keep them legible in dark mode. */
+.rk-chat-markdown-svg-image {
+  background: #fff;
+}
+
+.rk-chat-markdown .rk-chat-markdown-svg-image {
+  max-height: 32rem;
+}
+
+.rk-chat-markdown-svg {
+  margin: 0.65em 0;
+}
+
+.rk-chat-markdown-svg .rk-chat-markdown-pre-wrap,
+.rk-chat-markdown-svg .rk-chat-markdown-zoom .rk-chat-markdown-svg-image {
+  margin-top: 0.35em;
+  margin-bottom: 0;
+}
+
+.rk-chat-markdown-svg-tabs {
+  display: inline-flex;
+  gap: 0.15em;
+  border: 1px solid var(--border);
+  border-radius: 0.5em;
+  padding: 0.15em;
+  background: var(--muted);
+  font-size: 0.8em;
+}
+
+.rk-chat-markdown-svg-tabs button {
+  border: 0;
+  border-radius: 0.35em;
+  padding: 0.15em 0.65em;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.rk-chat-markdown-svg-tabs button[aria-pressed="true"] {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.rk-chat-markdown-svg-note {
+  margin: 0.35em 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+}
+
+.rk-chat-markdown-lightbox {
+  position: relative;
+}
+
+.rk-chat-markdown-lightbox-image {
+  display: block;
+  max-width: 90vw;
+  max-height: 85vh;
+  border-radius: 0.65em;
+  object-fit: contain;
+}
+
+.rk-chat-markdown-lightbox-actions {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.rk-chat-markdown-lightbox-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  cursor: pointer;
+}
+
+.rk-chat-markdown-lightbox-button:hover {
+  background: rgb(0 0 0 / 0.8);
+}

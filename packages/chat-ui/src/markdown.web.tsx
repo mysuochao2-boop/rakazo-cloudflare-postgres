@@ -15,12 +15,19 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogTitle,
 } from "@rakazo/ui-web";
-import { CheckIcon, CopyIcon, GlobeIcon, ImageIcon } from "./icons";
+import { CheckIcon, CloseIcon, CopyIcon, DownloadIcon, GlobeIcon, ImageIcon } from "./icons";
 import type { ChatMarkdownProps } from "./markdown";
 import {
   closeUnterminatedFence,
+  fenceInlineSvgBlocks,
   inlineMarkdownImageSrc,
+  inlineSvgDataUrl,
+  inlineSvgRejection,
   LinkFaviconsPausedContext,
   linkFaviconOrigin,
   linkLabel,
@@ -32,6 +39,7 @@ import {
   remoteImageRenders,
   remoteMarkdownImage,
   sanitizeMarkdownUrl,
+  svgSourceImage,
   useLinkFavicon,
 } from "./markdown";
 import { useMarkdownLinkCopy } from "./markdown-link-prompt";
@@ -253,8 +261,28 @@ function MarkdownImage({ src = "", alt, title }: { src?: string; alt?: string; t
   // Bumping this redraws after a tap. Whether the image shows is read from the current URL.
   const [, setRevision] = useState(0);
   const rejectedLink = enclosingLink === "rejected";
+  const svg = inlineSvgDataUrl(src);
+  if (svg) {
+    if (enclosingLink !== false) {
+      return <img src={svg.src} alt={alt ?? ""} title={title} loading="lazy" />;
+    }
+    return (
+      <ZoomableImage
+        src={svg.src}
+        alt={alt}
+        title={title}
+        svg
+        download={() => ({ blob: svgBlob(svg.source), name: "image.svg" })}
+      />
+    );
+  }
   if (inlineMarkdownImageSrc(src)) {
-    return <img src={src} alt={alt ?? ""} title={title} loading="lazy" />;
+    if (enclosingLink !== false) {
+      return <img src={src} alt={alt ?? ""} title={title} loading="lazy" />;
+    }
+    return (
+      <ZoomableImage src={src} alt={alt} title={title} download={() => dataUrlDownload(src)} />
+    );
   }
   if (remote && remoteImageRenders(remote.href, loadRemote, rejectedLink)) {
     return (
@@ -275,6 +303,165 @@ function MarkdownImage({ src = "", alt, title }: { src?: string; alt?: string; t
       title={title}
       onLoad={() => setRevision((revision) => revision + 1)}
     />
+  );
+}
+
+function svgBlob(source: string): Blob {
+  return new Blob([source], { type: "image/svg+xml" });
+}
+
+/** A base64 raster data: URL (already checked by inlineMarkdownImageSrc) as a download. */
+function dataUrlDownload(src: string): ImageDownload {
+  const comma = src.indexOf(",");
+  const type = src.slice(5, src.indexOf(";")).toLowerCase();
+  const binary = atob(src.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  const extension = type.split("/")[1]?.replace("jpeg", "jpg") ?? "img";
+  return { blob: new Blob([bytes], { type }), name: `image.${extension}` };
+}
+
+type ImageDownload = { blob: Blob; name: string };
+
+function saveDownload({ blob, name }: ImageDownload) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** An inline image that opens larger, with a download button, when clicked. */
+function ZoomableImage({
+  src,
+  alt,
+  title,
+  svg = false,
+  download,
+  onError,
+}: {
+  src: string;
+  alt?: string;
+  title?: string;
+  svg?: boolean;
+  download: () => ImageDownload;
+  onError?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = alt || (svg ? "SVG image" : "Image");
+  const imageClass = svg ? "rk-chat-markdown-svg-image" : undefined;
+  return (
+    <>
+      <button
+        type="button"
+        className="rk-chat-markdown-zoom"
+        aria-label={`Enlarge ${label}`}
+        title={title}
+        onClick={() => setOpen(true)}
+      >
+        <img src={src} alt={alt ?? ""} loading="lazy" className={imageClass} onError={onError} />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          showCloseButton={false}
+          className="w-auto max-w-none bg-transparent p-0 ring-0 sm:max-w-none"
+        >
+          <DialogTitle className="sr-only">{label}</DialogTitle>
+          <div className="rk-chat-markdown-lightbox">
+            <div className="rk-chat-markdown-lightbox-actions">
+              <button
+                type="button"
+                className="rk-chat-markdown-lightbox-button"
+                aria-label="Download image"
+                onClick={() => saveDownload(download())}
+              >
+                <DownloadIcon />
+              </button>
+              <DialogClose className="rk-chat-markdown-lightbox-button" aria-label="Close">
+                <CloseIcon />
+              </DialogClose>
+            </div>
+            <img
+              src={src}
+              alt={alt ?? ""}
+              className={
+                svg
+                  ? "rk-chat-markdown-lightbox-image rk-chat-markdown-svg-image"
+                  : "rk-chat-markdown-lightbox-image"
+              }
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** The text of a ```svg fence, or undefined for any other <pre>. */
+function svgFenceSource(node: HastNode | undefined): string | undefined {
+  const code = node?.children?.find((child) => child.type === "element");
+  if (code?.tagName !== "code") return undefined;
+  const className = (code.properties as { className?: unknown } | undefined)?.className;
+  const classes = Array.isArray(className) ? className : [className];
+  if (!classes.some((name) => typeof name === "string" && name.toLowerCase() === "language-svg")) {
+    return undefined;
+  }
+  return (code.children ?? []).map((child) => child.value ?? "").join("");
+}
+
+/** A ```svg fence: the drawing by default, the code on request. */
+function SvgCodeBlock({
+  source,
+  ...preProps
+}: React.ComponentPropsWithoutRef<"pre"> & { source: string }) {
+  const image = svgSourceImage(source);
+  const [view, setView] = useState<"preview" | "source">("preview");
+  const [failedSrc, setFailedSrc] = useState<string>();
+  const failed = image !== undefined && failedSrc === image.src;
+  const tooLarge = !image && inlineSvgRejection(source) === "too-large";
+  const showPreview = image !== undefined && !failed && view === "preview";
+  return (
+    <div className="rk-chat-markdown-svg">
+      {image && !failed ? (
+        <div className="rk-chat-markdown-svg-tabs">
+          <button
+            type="button"
+            aria-pressed={view === "preview"}
+            onClick={() => setView("preview")}
+          >
+            Preview
+          </button>
+          <button type="button" aria-pressed={view === "source"} onClick={() => setView("source")}>
+            Source
+          </button>
+        </div>
+      ) : null}
+      {showPreview ? (
+        <ZoomableImage
+          src={image.src}
+          alt="SVG image"
+          svg
+          download={() => ({ blob: svgBlob(image.source), name: "image.svg" })}
+          onError={() => setFailedSrc(image.src)}
+        />
+      ) : (
+        <CodeBlock {...preProps} />
+      )}
+      {failed ? (
+        <p className="rk-chat-markdown-svg-note">
+          This SVG could not be drawn; showing its source.
+        </p>
+      ) : tooLarge ? (
+        <p className="rk-chat-markdown-svg-note">
+          This SVG is too large to preview; showing its source.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -406,7 +593,9 @@ const components: Components = {
       <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt} title={title} />
     );
   },
-  pre({ node: _node, ...props }) {
+  pre({ node, ...props }) {
+    const svg = svgFenceSource(node as HastNode | undefined);
+    if (svg !== undefined) return <SvgCodeBlock source={svg} {...props} />;
     return <CodeBlock {...props} />;
   },
   table({ node, children, ...props }) {
@@ -445,7 +634,8 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   streaming = false,
 }: ChatMarkdownProps) {
   const { request, dialog } = useExternalLinkConfirm();
-  const source = streaming ? closeUnterminatedFence(children) : children;
+  const withSvg = fenceInlineSvgBlocks(children);
+  const source = streaming ? closeUnterminatedFence(withSvg) : withSvg;
 
   return (
     <ConfirmLinkContext.Provider value={request}>

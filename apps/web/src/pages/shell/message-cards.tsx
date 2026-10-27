@@ -2,10 +2,10 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { MessageBlock } from "@rakazo/contracts";
 import { abortableDelay } from "@rakazo/core";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
-import { X } from "lucide-react";
+import { Download, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BuiCard, SuccessPop } from "../../components/ai/primitives";
-import type { ArtifactTarget } from "../../lib/artifact-open";
+import { type ArtifactTarget, downloadArtifact } from "../../lib/artifact-open";
 import { chartViewport } from "../../lib/chart-viewport";
 import { connectMcpOauth } from "../../lib/mcp-connect";
 import { rpc } from "../../lib/rpc";
@@ -521,13 +521,16 @@ export function ArtifactImage({
   target,
   artifactId,
   name,
+  mimeType,
 }: {
   target: ArtifactTarget;
   artifactId: string;
   name: string;
+  mimeType?: string;
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const src = useArtifactImage(target, artifactId, visible);
@@ -573,17 +576,50 @@ export function ArtifactImage({
             className="w-auto max-w-none bg-transparent p-0 ring-0 sm:max-w-none"
           >
             <DialogTitle className="sr-only">{name}</DialogTitle>
-            <DialogClose
-              aria-label={t`Close image preview`}
-              render={<Button variant="ghost" size="icon-sm" className="absolute end-2 top-2" />}
-            >
-              <X />
-            </DialogClose>
+            <div className="absolute end-2 top-2 flex gap-1">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t`Download ${name}`}
+                title={t`Download ${name}`}
+                onClick={() =>
+                  void (async () => {
+                    setDownloadError(null);
+                    try {
+                      await downloadArtifact(
+                        target,
+                        artifactId,
+                        name,
+                        mimeType ?? "application/octet-stream",
+                      );
+                    } catch {
+                      setDownloadError(t`Could not download ${name}. Try again.`);
+                    }
+                  })()
+                }
+              >
+                <Download />
+              </Button>
+              <DialogClose
+                aria-label={t`Close image preview`}
+                render={<Button variant="ghost" size="icon-sm" />}
+              >
+                <X />
+              </DialogClose>
+            </div>
             <img
               src={src}
               alt={name}
               className="max-h-[85vh] max-w-[90vw] rounded-xl object-contain"
             />
+            {downloadError ? (
+              <p
+                role="alert"
+                className="rounded-xl bg-background px-3 py-2 text-[13px] text-destructive"
+              >
+                {downloadError}
+              </p>
+            ) : null}
           </DialogContent>
         </Dialog>
       ) : null}
