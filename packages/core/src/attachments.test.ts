@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   AttachmentValidationError,
+  attachmentSupportSummary,
   attachmentsForBot,
   blocksToAgentHistoryText,
   decodeAttachmentBase64,
   inferAttachmentMimeType,
   promptTextForAttachments,
+  unsupportedAttachmentTypeMessage,
   userTurnMessageForRun,
   validateAttachmentMimeType,
 } from "./attachments.js";
@@ -123,5 +125,20 @@ describe("peer message history", () => {
         { kind: "bot_message_sent", toBotId: "b_2", toBotName: "Analyst", text: "chart it" },
       ]),
     ).toBe("[to Analyst] chart it");
+  });
+});
+
+describe("attach_file type guidance", () => {
+  it("names the rejected extension and every supported one", () => {
+    expect(attachmentSupportSummary()).toBe(
+      "supported: .jpg, .jpeg, .png, .webp, .gif, .pdf, .txt, .md, .markdown, .csv, .html, .htm, .json (max 8 MB)",
+    );
+    expect(unsupportedAttachmentTypeMessage("dir.v2/archive.tar.GZ")).toMatch(
+      /^unsupported attachment type "\.gz"; supported: /,
+    );
+    expect(unsupportedAttachmentTypeMessage("dir.v2/README")).toContain("(no file extension)");
+    expect(unsupportedAttachmentTypeMessage("art/pelican.svg")).toContain(
+      "convert it to PNG first",
+    );
   });
 });

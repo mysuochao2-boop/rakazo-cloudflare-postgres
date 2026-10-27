@@ -5,6 +5,7 @@ import {
   SecretAskPurpose,
   SecretHttpRequest,
 } from "@rakazo/contracts";
+import { attachmentSupportSummary } from "@rakazo/core";
 import { z } from "zod";
 import { backgroundTaskTools } from "./background-tasks.js";
 import { allowPrivateHttpSecretOrigins } from "./bot-secrets.js";
@@ -283,8 +284,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "attach_file",
-    description:
-      "Attach a workspace file from this bot's home to the chat thread as an image or common file. The file stays in place; users can open it from the message and from the Artifacts tab. For a self-contained HTML page, document, or anything else meant to be opened and viewed on its own (not just downloaded) — give it name and description: a short human-readable title and a one-line summary of what it is. Skip them for an ordinary attachment like a log file or export. To UPDATE something you already made, call this again with the exact same name — it becomes a new version of that same artifact (visible in a version switcher) instead of a separate one; a different name always starts a new artifact.",
+    description: `Attach a workspace file from this bot's home to the chat thread as an image or common file (${attachmentSupportSummary()}; other types such as .svg, .zip or .docx are rejected — for SVG put the source in a \`\`\`svg block in your reply, which renders as an image, or convert it to PNG first). The file stays in place; users can open it from the message and from the Artifacts tab. For a self-contained HTML page, document, or anything else meant to be opened and viewed on its own (not just downloaded) — give it name and description: a short human-readable title and a one-line summary of what it is. Skip them for an ordinary attachment like a log file or export. To UPDATE something you already made, call this again with the exact same name — it becomes a new version of that same artifact (visible in a version switcher) instead of a separate one; a different name always starts a new artifact.`,
     inputSchema: {
       type: "object",
       properties: {

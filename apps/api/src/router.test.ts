@@ -1670,7 +1670,7 @@ describe("computer terminal and file transfer", () => {
       expect.anything(),
       "bots/bot-1/notes.txt",
       expect.anything(),
-      { maxBytes: 10 * 1024 * 1024 },
+      { maxBytes: 8 * 1024 * 1024 }, // the Computer read cap (supervisor rejects larger requests with 413)
     );
     const stopped = setup({ state: "stopped" });
     await expect(stopped.call("downloadFile", { path: "notes.txt" })).resolves.toMatchObject({

@@ -44,6 +44,7 @@ import {
   BotSecretName,
   botSecretSubmissionSchema,
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
+  COMPUTER_ATTACHMENT_MAX_BYTES,
   COMPUTER_COMMAND_OUTPUT_MAX_CHARS,
   disabledBuiltinToolSet,
   HistoryReadInputSchema,
@@ -71,7 +72,6 @@ import {
   formatSkillsCatalogInstruction,
   historyFormatFor,
   humanizeToolName,
-  inferAttachmentMimeType,
   isCallClientNonce,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
@@ -226,6 +226,7 @@ import {
   type PluginConnectionRow,
   planLiveConnectionSync,
 } from "./composio-connector.js";
+import { readComputerAttachment } from "./computer-attachment-read.js";
 import { BACKGROUND_WORK_LAUNCH, scheduleComputerSleep } from "./computer-idle.js";
 import {
   acquireComputerExecutionLease,
@@ -4951,7 +4952,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   computer,
                   resolveBotWorkspacePath(computerMode, bot.id, dataPath),
                   context,
-                  { maxBytes: ATTACHMENT_MAX_BYTES },
+                  { maxBytes: COMPUTER_ATTACHMENT_MAX_BYTES },
                 );
                 rows = parsePlotData(dataPath, new TextDecoder().decode(bytes));
               }
@@ -5030,17 +5031,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({ error, path: filePath });
             };
             if (!deps.artifacts) return failAttach("artifact storage unavailable");
-            const storedPath = resolveBotWorkspacePath(computerMode, bot.id, filePath);
-            let bytes: Uint8Array;
-            try {
-              bytes = await deps.sandbox.readFile(computer, storedPath, context, {
-                maxBytes: ATTACHMENT_MAX_BYTES,
-              });
-            } catch {
-              return failAttach("file not found or unreadable");
-            }
-            const mimeType = inferAttachmentMimeType(filePath);
-            if (!mimeType) return failAttach("unsupported attachment type");
+            // Type first, then a read capped at what the Computer serves; each failure
+            // names its real cause so the model does not chase permissions or paths.
+            const read = await readComputerAttachment({
+              filePath,
+              resolvePath: (requested) => resolveBotWorkspacePath(computerMode, bot.id, requested),
+              readFile: (storedPath, options) =>
+                deps.sandbox.readFile(computer, storedPath, context, options),
+              secrets: runSecrets,
+            });
+            if (!read.ok) return failAttach(read.error);
+            const { bytes } = read;
             try {
               const attached = await attachWorkspaceFileToThread(
                 { prisma: deps.prisma, artifacts: deps.artifacts },

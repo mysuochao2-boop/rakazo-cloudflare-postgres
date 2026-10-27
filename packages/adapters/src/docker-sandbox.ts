@@ -17,6 +17,7 @@ import type {
   ScreenSession,
   TerminalRequest,
 } from "@rakazo/adapter-kit";
+import { COMPUTER_FILE_READ_MAX_BYTES } from "@rakazo/contracts";
 import { boundedSandboxCommandTimeoutMs, resolveSupervisorToken } from "@rakazo/core";
 import { outgoingCorrelationHeaders } from "@rakazo/logging";
 import {
@@ -36,8 +37,8 @@ import {
 
 export const MAX_SANDBOX_ERROR_RESPONSE_BYTES = 8 * 1024;
 export const MAX_SANDBOX_SUCCESS_RESPONSE_BYTES = 16 * 1024 * 1024;
-/** Keep in sync with supervisor MAX_SUPERVISOR_FILE_READ_BYTES (512m mem_limit OOM guard). */
-export const MAX_SANDBOX_EXPORT_FILE_BYTES = 8 * 1024 * 1024;
+/** Equals supervisor MAX_SUPERVISOR_FILE_READ_BYTES (512m mem_limit OOM guard); single source in contracts. */
+export const MAX_SANDBOX_EXPORT_FILE_BYTES = COMPUTER_FILE_READ_MAX_BYTES;
 export const SCREEN_RELEASE_TIMEOUT_MS = 8_000;
 const SANDBOX_ERROR_RESPONSE_TIMEOUT_MS = 1_000;
 const SANDBOX_SUCCESS_RESPONSE_TIMEOUT_MS = 30_000;

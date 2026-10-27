@@ -137,6 +137,7 @@ import {
   ATTACHMENT_MAX_BYTES,
   appContract,
   BotSecretAuth,
+  COMPUTER_ATTACHMENT_MAX_BYTES,
   ComputerCommandSchema,
   foldComputerCommands,
   IntegrationProviderIdSchema,
@@ -152,6 +153,7 @@ import {
   clampCatalogThinkingLevel,
   containsSecret,
   expandSkillReferencesInPrompt,
+  formatAttachmentByteLimit,
   hasMixedOneShotSchedule,
   isOneShotRoutineCrons,
   nextCronDateAcrossStrict,
@@ -2982,11 +2984,15 @@ export function createRouter(deps: RouterDeps) {
             toComputerRef(computer),
             storedPath,
             computerContext(context.actor, bot.id, "download"),
-            { maxBytes: ATTACHMENT_MAX_BYTES },
+            // Never ask for more than the Computer serves: the supervisor rejects any
+            // maxBytes above its read cap with 413, even for a tiny file.
+            { maxBytes: COMPUTER_ATTACHMENT_MAX_BYTES },
           )
           .catch((error: unknown) => {
             if (error instanceof Error && /exceeds|too large/i.test(error.message)) {
-              throw new ORPCError("BAD_REQUEST", { message: "File is too large to download." });
+              throw new ORPCError("BAD_REQUEST", {
+                message: `File is too large to download (limit ${formatAttachmentByteLimit(COMPUTER_ATTACHMENT_MAX_BYTES)}).`,
+              });
             }
             throw error;
           });
