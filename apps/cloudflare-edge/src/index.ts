@@ -17,9 +17,9 @@ interface RuntimeCommand {
 // Bump only when a deployed Container generation leaves Durable Object
 // instances unable to restart. The database owns run state; this object stores
 // only the bot-id fence, so a new generation safely gets a fresh Container.
-const API_CONTAINER_GENERATION = "v15";
+const API_CONTAINER_GENERATION = "v16";
 const SCHEDULER_CONTAINER_GENERATION = "v11";
-const BOT_RUNTIME_GENERATION = "v21";
+const BOT_RUNTIME_GENERATION = "v22";
 // Bounded keep-warm: only bots with a dispatch in the last WARM_WINDOW_MS,
 // at most WARM_MAX_BOTS of them, are pinged by the cron.
 const WARM_PREFIX = "__edge/warm-bots/";

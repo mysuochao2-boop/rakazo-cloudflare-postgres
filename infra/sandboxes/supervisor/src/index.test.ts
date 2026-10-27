@@ -4,11 +4,11 @@ import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { resolveSupervisorToken } from "@rakazo/core";
+import { COMPUTER_FILE_READ_MAX_BYTES, resolveSupervisorToken } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
-  MAX_SUPERVISOR_FILE_REQUEST_BYTES,
   MAX_SUPERVISOR_FILE_READ_BYTES,
+  MAX_SUPERVISOR_FILE_REQUEST_BYTES,
   MAX_SUPERVISOR_REQUEST_BYTES,
   resolveDockerSocketPath,
   supervisorApp,
@@ -223,6 +223,12 @@ describe("sandbox supervisor HTTP boundary", () => {
   it("caps file reads below the supervisor memory budget", () => {
     expect(MAX_SUPERVISOR_FILE_READ_BYTES).toBe(8 * 1024 * 1024);
     expect(MAX_SUPERVISOR_FILE_READ_BYTES).toBeLessThan(MAX_SUPERVISOR_FILE_REQUEST_BYTES);
+  });
+
+  it("matches the read cap every caller is built against", () => {
+    // attach_file, downloads and exports cap maxBytes at this value; if the two drift
+    // apart again every request above the cap is rejected with 413 for any file.
+    expect(MAX_SUPERVISOR_FILE_READ_BYTES).toBe(COMPUTER_FILE_READ_MAX_BYTES);
   });
 
   it("keeps the larger file-write allowance scoped to that exact POST route", () => {

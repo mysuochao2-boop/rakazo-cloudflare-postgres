@@ -1,4 +1,15 @@
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * Largest single read a live Computer serves. Mirrors the sandbox supervisor's
+ * MAX_SUPERVISOR_FILE_READ_BYTES (512m mem_limit OOM guard): the supervisor
+ * answers 413 to any request whose maxBytes is larger, regardless of file size.
+ */
+export const COMPUTER_FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
+/** Largest workspace file that can be attached to a thread or downloaded from a Computer. */
+export const COMPUTER_ATTACHMENT_MAX_BYTES = Math.min(
+  ATTACHMENT_MAX_BYTES,
+  COMPUTER_FILE_READ_MAX_BYTES,
+);
 export const ATTACHMENT_MAX_COUNT = 4;
 export const ARTIFACT_NAME_MAX_LENGTH = 255;
 export const ARTIFACT_DESCRIPTION_MAX_LENGTH = 280;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   displayBotWorkspacePath,
+  normalizeWorkspacePath,
   resolveBotUploadPath,
   resolveBotWorkspaceCwd,
   resolveBotWorkspacePath,
@@ -61,6 +62,27 @@ describe("resolveBotUploadPath", () => {
     expect(resolveBotUploadPath("team", "bot-1", "shared/brief.md")).toBe("shared/brief.md");
     expect(() => resolveBotUploadPath("team", "bot-1", "bots/bot-2/secret.txt")).toThrow(
       /escapes the bot workspace/,
+    );
+  });
+});
+
+describe("workspace path normalization", () => {
+  it('treats "." and "./" as the workspace root', () => {
+    expect(normalizeWorkspacePath(".")).toBe("");
+    expect(normalizeWorkspacePath("./")).toBe("");
+    expect(normalizeWorkspacePath("./notes/./a.txt")).toBe("notes/a.txt");
+    expect(resolveBotWorkspacePath("team", "bot-1", ".")).toBe("bots/bot-1");
+    expect(resolveBotWorkspacePath("team", "bot-1", "./")).toBe("bots/bot-1");
+    expect(resolveBotWorkspacePath("team", "bot-1", "./a.svg")).toBe("bots/bot-1/a.svg");
+    expect(resolveBotWorkspacePath("dedicated", "bot-1", ".")).toBe(".");
+  });
+
+  it('still rejects ".." anywhere in the path', () => {
+    for (const value of ["..", "../x", "a/../../b", "./..", "a/..", "..\\x", "/../etc"]) {
+      expect(() => normalizeWorkspacePath(value)).toThrow("Path escapes the computer workspace");
+    }
+    expect(() => resolveBotWorkspacePath("team", "bot-1", "../bot-2/x")).toThrow(
+      "Path escapes the computer workspace",
     );
   });
 });

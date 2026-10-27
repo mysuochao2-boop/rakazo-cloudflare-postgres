@@ -2,10 +2,15 @@ import {
   ATTACHMENT_MAX_BASE64_LENGTH,
   ATTACHMENT_MAX_BYTES,
   type AttachmentMimeType,
+  COMPUTER_ATTACHMENT_MAX_BYTES,
   isAllowedAttachmentMimeType,
   isAttachmentImageMimeType,
   type MessageBlock,
 } from "@rakazo/contracts";
+
+// Re-exported so packages that depend only on core (the sandbox supervisor) can
+// assert their own read cap stays equal to this single source of truth.
+export { COMPUTER_ATTACHMENT_MAX_BYTES, COMPUTER_FILE_READ_MAX_BYTES } from "@rakazo/contracts";
 
 export class AttachmentValidationError extends Error {
   constructor(message: string) {
@@ -166,6 +171,33 @@ export function inferAttachmentMimeType(
   }
   if (reportedType && isAllowedAttachmentMimeType(reportedType)) return reportedType;
   return extensionType ?? null;
+}
+
+/** Every file extension attach_file accepts, in display order. */
+export const ATTACHMENT_SUPPORTED_EXTENSIONS: readonly string[] = Object.keys(EXTENSION_MIME_TYPES);
+
+/** Human-readable size such as "8 MB" for model-facing limits. */
+export function formatAttachmentByteLimit(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return Number.isInteger(mb) ? `${mb} MB` : `${bytes} bytes`;
+}
+
+/** One-line summary of what attach_file accepts, shared by its tool description and errors. */
+export function attachmentSupportSummary(maxBytes = COMPUTER_ATTACHMENT_MAX_BYTES): string {
+  return `supported: ${ATTACHMENT_SUPPORTED_EXTENSIONS.join(", ")} (max ${formatAttachmentByteLimit(maxBytes)})`;
+}
+
+/** Explains an unsupported attach_file type and what to do instead. */
+export function unsupportedAttachmentTypeMessage(name: string): string {
+  const base = name.slice(name.replace(/\\/g, "/").lastIndexOf("/") + 1);
+  const dot = base.lastIndexOf(".");
+  const extension = dot > 0 ? base.slice(dot).toLowerCase() : "";
+  const label = extension ? JSON.stringify(extension) : "(no file extension)";
+  const message = `unsupported attachment type ${label}; ${attachmentSupportSummary()}`;
+  if (extension === ".svg") {
+    return `${message}. SVG files cannot be attached: put the SVG source directly in your reply (a \`\`\`svg block renders as an image), or convert it to PNG first and attach the PNG.`;
+  }
+  return message;
 }
 
 export function attachmentExtensionForMimeType(mimeType: string): string {
