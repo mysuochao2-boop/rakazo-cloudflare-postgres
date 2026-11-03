@@ -17,8 +17,9 @@ async function waitUntilReady(
   readinessPath: string,
 ): Promise<void> {
   const target = container.getTcpPort(port);
+  const deadline = Date.now() + 45_000;
   let cause: unknown;
-  for (let attempt = 0; attempt < 600; attempt += 1) {
+  while (Date.now() < deadline) {
     try {
       // Bound each probe: a probe that hangs instead of erroring would
       // otherwise stall the whole gate (and every request behind it)
@@ -31,7 +32,8 @@ async function waitUntilReady(
     } catch (error) {
       cause = error;
     }
-    await scheduler.wait(200);
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await scheduler.wait(Math.min(200, remaining));
   }
   throw new Error("Container did not become ready", { cause });
 }
@@ -191,7 +193,7 @@ export function nextDeliverable(
  * and the executor's fenced lease claim lets only one worker run a given run.
  */
 export class BotRuntimeContainer extends DurableObject<CloudflareEnv> {
-  private draining: Promise<void> | undefined;
+  private draining: { promise: Promise<void>; startedAt: number } | undefined;
 
   private async identify(request: Request): Promise<string> {
     const requested = request.headers.get("x-rakazo-bot-id");
@@ -226,10 +228,21 @@ export class BotRuntimeContainer extends DurableObject<CloudflareEnv> {
   }
 
   private drain(): Promise<void> {
-    this.draining ??= this.deliverPending().finally(() => {
-      this.draining = undefined;
+    // A waitUntil task can be cancelled when an isolate is evicted without its
+    // Promise settling. Do not let that stale in-memory Promise fence durable
+    // pending work forever after the isolate is reused.
+    if (this.draining && Date.now() - this.draining.startedAt < 60_000) {
+      return this.draining.promise;
+    }
+    const current = {
+      startedAt: Date.now(),
+      promise: Promise.resolve() as Promise<void>,
+    };
+    current.promise = this.deliverPending().finally(() => {
+      if (this.draining === current) this.draining = undefined;
     });
-    return this.draining;
+    this.draining = current;
+    return current.promise;
   }
 
   private async deliverPending(): Promise<void> {
@@ -327,8 +340,13 @@ export class BotRuntimeContainer extends DurableObject<CloudflareEnv> {
     const botId = await this.identify(request);
     if (url.pathname === "/warm") {
       const container = await this.ensureRuntime(botId);
-      // Busy timeout is only for runs; a warm ping keeps the idle window.
-      if ((await this.pending()).length === 0) {
+      const pending = await this.pending();
+      // A previous waitUntil drain may have been cancelled while the durable
+      // queue survived. Warming a now-ready runtime must also resume that work.
+      if (pending.length > 0) {
+        this.ctx.waitUntil(this.drain());
+      } else {
+        // Busy timeout is only for runs; a warm ping keeps the idle window.
         await container.setInactivityTimeout(BOT_RUNTIME_IDLE_TIMEOUT_MS);
       }
       return new Response(null, { status: 204 });
