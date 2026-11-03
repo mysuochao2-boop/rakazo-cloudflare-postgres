@@ -25,6 +25,10 @@ describe("createDb", () => {
     expect(pool.options.connectionTimeoutMillis).toBe(10_000);
     expect(pool.options.idleTimeoutMillis).toBe(0);
     expect(pool.options.application_name).toBe("rakazo-test");
+    expect(pool.options.keepAliveInitialDelayMillis).toBe(10_000);
+    expect(pool.options.statement_timeout).toBe(15_000);
+    expect(pool.options.query_timeout).toBe(20_000);
+    expect(pool.options.idle_in_transaction_session_timeout).toBe(60_000);
     expect(pool.listenerCount("error")).toBeGreaterThan(0);
     expect(pool.listenerCount("connect")).toBeGreaterThan(0);
 
@@ -108,6 +112,10 @@ describe("createPool", () => {
     expect(pool.options.connectionTimeoutMillis).toBe(10_000);
     expect(pool.options.idleTimeoutMillis).toBe(0);
     expect(pool.options.application_name).toBe("rakazo-pool-test");
+    expect(pool.options.keepAliveInitialDelayMillis).toBe(10_000);
+    expect(pool.options.statement_timeout).toBe(15_000);
+    expect(pool.options.query_timeout).toBe(20_000);
+    expect(pool.options.idle_in_transaction_session_timeout).toBe(60_000);
     expect(pool.listenerCount("error")).toBeGreaterThan(0);
     expect(pool.listenerCount("connect")).toBeGreaterThan(0);
     expect(() => pool.emit("error", new Error("idle client lost"))).not.toThrow();

@@ -1,0 +1,46 @@
+# Cloudflare edge local/dev secrets (tracked template — placeholders only, never real values).
+# Copy to `.dev.vars` (git-ignored, loaded automatically by `wrangler dev`) and fill
+# with NON-PRODUCTION values. Production values are set with
+# `pnpm --filter @rakazo/cloudflare-edge exec wrangler secret put <KEY>`.
+# Docs: apps/cloudflare-edge/README.md, apps/cloudflare-edge/MIGRATION.md.
+# Gate before migration/deploy: `pnpm cloudflare:preflight` (shell env, not this file).
+
+# PostgreSQL over TLS. DATABASE_URL is the pooled endpoint (API/bot containers);
+# WORKER_DATABASE_URL must be direct or session-pooled (Graphile + advisory locks).
+DATABASE_URL=postgres://rakazo:CHANGE_ME@postgres.example.com:5432/rakazo?sslmode=verify-full
+WORKER_DATABASE_URL=postgres://rakazo:CHANGE_ME@postgres.example.com:5432/rakazo?sslmode=verify-full
+# Optional fallback outside the Durable Object fanout profile.
+REALTIME_DATABASE_URL=
+
+# Each of these must be an independent random value (`openssl rand -hex 32`).
+# Never reuse one value across keys, and never reuse a non-Cloudflare deployment's secret.
+BETTER_AUTH_SECRET=CHANGE_ME_32_PLUS_CHAR_SECRET
+ENCRYPTION_KEY=CHANGE_ME_64_HEX_CHAR_KEY
+SCREEN_PROXY_SECRET=CHANGE_ME_32_PLUS_CHAR_SECRET
+RUNTIME_DISPATCH_SECRET=CHANGE_ME_32_PLUS_CHAR_SECRET
+REALTIME_FANOUT_SECRET=CHANGE_ME_32_PLUS_CHAR_SECRET
+# Default Cloudflare computer gateway (SANDBOX_PROVIDER=cloudflare). Independent
+# from every other secret above; do not add it to CONTAINER_ENV_JSON.
+COMPUTER_GATEWAY_SECRET=CHANGE_ME_32_PLUS_CHAR_SECRET
+# Edge Worker's authenticated object gateway for R2. The Worker derives the
+# gateway URL from API_URL, so only the secret is a Worker secret here.
+OBJECT_STORE_GATEWAY_SECRET=CHANGE_ME_32_PLUS_CHAR_SECRET
+
+# Hybrid noVNC: comma-separated upstream hostnames the edge /novnc proxy may
+# fetch (mirror into CONTAINER_ENV_JSON so API screen sealing accepts them).
+# SCREEN_UPSTREAM_ALLOWLIST=computer.example.com
+
+# Optional provider overrides as a JSON object; every value must be a string.
+# Blocked keys (AGENT_RUNTIME, DATABASE_URL, DATA_DIR, secrets, gateway URLs)
+# are ignored. Hybrid remote-Docker example:
+# CONTAINER_ENV_JSON={"SANDBOX_PROVIDER":"docker","SANDBOX_SUPERVISOR_URL":"https://computer.example.com","SANDBOX_SUPERVISOR_TOKEN":"CHANGE_ME"}
+CONTAINER_ENV_JSON=
+
+# S3-compatible credentials are for release tools running OUTSIDE the Worker
+# gateway (e.g. `migrate:files --apply`). Export them in the shell when running
+# preflight/smoke/backfill, not in `.dev.vars`:
+# OBJECT_STORE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+# OBJECT_STORE_BUCKET=rakazo-runtime
+# OBJECT_STORE_ACCESS_KEY_ID=CHANGE_ME
+# OBJECT_STORE_SECRET_ACCESS_KEY=CHANGE_ME
+# OBJECT_STORE_PREFIX=rakazo

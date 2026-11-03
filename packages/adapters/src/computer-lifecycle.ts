@@ -50,6 +50,13 @@ const BOOT_WAIT_MS = 250;
 const BOOT_CLAIM_STALE_MS = EXECUTION_LEASE_MS;
 
 /**
+ * How long a computer may stay in booting before the reconciler forces it to
+ * error. Twice the claim stale window: long enough for a slow provision,
+ * short enough to unblock the next run without manual intervention.
+ */
+export const COMPUTER_BOOTING_EXPIRE_MS = BOOT_CLAIM_STALE_MS * 2;
+
+/**
  * Booting and suspending claims newer than an execution-lease TTL are live.
  * Older ones are abandoned: the worker died mid-transition, and Reset or a later
  * provision may reclaim them. Missing stamps fail closed (treated as live).
@@ -63,6 +70,15 @@ function isLiveSuspending(
   now = Date.now(),
 ): boolean {
   return computer.state === "suspending" && !isAbandonedLifecycleClaim(computer.updatedAt, now);
+}
+
+export function isExpiredBootingClaim(
+  updatedAt: Date | null | undefined,
+  now = Date.now(),
+): boolean {
+  return (
+    updatedAt instanceof Date && now - updatedAt.getTime() >= COMPUTER_BOOTING_EXPIRE_MS
+  );
 }
 
 /**

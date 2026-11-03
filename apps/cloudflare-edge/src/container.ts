@@ -20,7 +20,12 @@ async function waitUntilReady(
   let cause: unknown;
   for (let attempt = 0; attempt < 600; attempt += 1) {
     try {
-      const response = await target.fetch(`http://container${readinessPath}`);
+      // Bound each probe: a probe that hangs instead of erroring would
+      // otherwise stall the whole gate (and every request behind it)
+      // forever, in front of the per-request header deadline below.
+      const response = await target.fetch(`http://container${readinessPath}`, {
+        signal: AbortSignal.timeout(2_000),
+      });
       if (response.ok) return;
       cause = new Error(`readiness check returned ${response.status}`);
     } catch (error) {
@@ -29,6 +34,25 @@ async function waitUntilReady(
     await scheduler.wait(200);
   }
   throw new Error("Container did not become ready", { cause });
+}
+
+/** Deadline while the container has accepted the request but sent nothing yet. */
+const API_HEADER_TIMEOUT_MS = 20_000;
+
+/**
+ * Streams that must never carry an edge-side header deadline: oRPC event
+ * iterators (threads/logs subscribe) and the /novnc websocket tunnel. The
+ * client aborts both with its own signal.
+ */
+export function isLongLivedRequest(request: Request): boolean {
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/novnc/")) return true;
+  if (request.headers.get("upgrade")?.toLowerCase() === "websocket") return true;
+  if (request.headers.get("accept")?.includes("text/event-stream")) return true;
+  // oRPC event iterators are the subscribe procedures under /rpc.
+  return url.pathname === "/rpc" || url.pathname.startsWith("/rpc/")
+    ? url.pathname.endsWith("/subscribe")
+    : false;
 }
 
 function forwardRequest(request: Request): Request {
@@ -59,8 +83,50 @@ abstract class ManagedContainer extends DurableObject<CloudflareEnv> {
   }
 
   override async fetch(request: Request): Promise<Response> {
+    const startedAt = Date.now();
+    const pathname = new URL(request.url).pathname;
     const container = await this.readyContainer();
-    return container.getTcpPort(this.options.port).fetch(forwardRequest(request));
+    const readyMs = Date.now() - startedAt;
+    const forwarded = forwardRequest(request);
+    // A container that passed readiness can still wedge on a hung DB
+    // checkout. Bound only the wait for response headers: long-lived
+    // streams (oRPC event iterators, /novnc websocket tunnels) keep their
+    // own deadline. Once headers arrive the deadline no longer applies.
+    if (isLongLivedRequest(request)) {
+      return container.getTcpPort(this.options.port).fetch(forwarded);
+    }
+    const controller = new AbortController();
+    // Lift the deadline once response headers arrive; a body stream that
+    // runs long after a healthy start keeps flowing.
+    let releaseDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        container.getTcpPort(this.options.port).fetch(forwarded, { signal: controller.signal }),
+        new Promise<never>((_, reject) => {
+          releaseDeadline = setTimeout(() => {
+            controller.abort(new DOMException("upstream timeout", "TimeoutError"));
+            reject(new DOMException("upstream timeout", "TimeoutError"));
+          }, API_HEADER_TIMEOUT_MS);
+        }),
+      ]);
+      const headerMs = Date.now() - startedAt - readyMs;
+      if (readyMs + headerMs >= 5_000) {
+        edgeTiming("edge.managed_slow", { pathname, readyMs, headerMs, status: response.status });
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof Error && error.name === "TimeoutError") {
+        edgeTiming("edge.managed_timeout", {
+          pathname,
+          readyMs,
+          headerMs: Date.now() - startedAt - readyMs,
+        });
+        return Response.json({ error: "upstream_timeout" }, { status: 504 });
+      }
+      throw error;
+    } finally {
+      if (releaseDeadline) clearTimeout(releaseDeadline);
+    }
   }
 }
 

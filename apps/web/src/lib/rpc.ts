@@ -7,6 +7,9 @@ import { desktopBridge } from "./desktop";
 
 const SPACE_STORAGE_KEY = "rakazo:space-id";
 
+/** Default per-request deadline when the caller passes no signal of its own. */
+const RPC_FETCH_TIMEOUT_MS = 15_000;
+
 type RpcClientContext = { spaceId?: string | null };
 
 export function selectedSpaceId(): string | null {
@@ -69,9 +72,18 @@ const link = new RPCLink<RpcClientContext>({
     }
     const spaceId =
       options.context.spaceId === undefined ? selectedSpaceId() : options.context.spaceId;
+    // Bound only a call whose caller supplied no deadline of its own, so a
+    // backend that accepts but never answers fails fast instead of hanging
+    // the UI. The caller's signal arrives in `options` (the request always
+    // carries a signal object, even when the caller passed none): long-lived
+    // subscriptions abort with their owner, thread snapshots already carry
+    // their own timeout, and those keep their signal untouched.
+    const callerSignal = options.signal;
+    const signal = callerSignal ?? AbortSignal.timeout(RPC_FETCH_TIMEOUT_MS);
     return fetch(request, {
       headers: withSpaceHeaders(request.headers, spaceId),
       credentials: "include",
+      signal,
     });
   },
 });

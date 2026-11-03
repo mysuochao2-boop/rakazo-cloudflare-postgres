@@ -49,6 +49,14 @@ apps/web/src/locales/**/*.js
 apps/web/scripts/msgids.json
 playwright-report-www
 
+# Cloudflare edge local secrets: .dev.vars is loaded by `wrangler dev` (never commit);
+# the .example template keeps placeholders only.
+apps/cloudflare-edge/.dev.vars
+apps/cloudflare-edge/.dev.vars.*.local
+!apps/cloudflare-edge/.dev.vars.example
+# Production + images-stack env files (never commit); the .example templates keep placeholders only.
+.env.production
+infra/compose/.env
 # Hybrid VPS supervisor secrets (never commit)
 .env.supervisor
 infra/compose/.env.supervisor

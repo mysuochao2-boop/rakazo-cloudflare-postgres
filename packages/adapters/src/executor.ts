@@ -7475,8 +7475,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
       } catch (setupError) {
+        // Cap infinite retries that caused cloud-mail bot fence to hit 2729:
+        // ComputerBusyError is retried but with a fence ceiling, and always
+        // records a visible error so `attempts` is observable.
+        const MAX_SETUP_ATTEMPTS = 50;
+        const MAX_COMPUTER_BUSY_RETRIES = 25;
         const computerBusy = setupError instanceof ComputerBusyError;
-        const retryForever = computerBusy || isTooManyDatabaseConnections(setupError);
+        const tooManyConns = isTooManyDatabaseConnections(setupError);
+        const shouldCap =
+          fence >= MAX_SETUP_ATTEMPTS ||
+          (computerBusy && fence >= MAX_COMPUTER_BUSY_RETRIES);
+        const retryForever = !shouldCap && (computerBusy || tooManyConns);
+        const setupErrorMessage =
+          setupError instanceof Error ? setupError.message : String(setupError);
+        const normalizedError = computerBusy
+          ? `Computer busy; retrying (${setupErrorMessage})`
+          : retryForever
+            ? `Run setup retrying (${setupErrorMessage})`
+            : "Run setup failed; retrying";
         if (!computerBusy) {
           // undici collapses every network failure to "fetch failed"; the cause names the
           // host and errno, which is the only part worth paging over.
@@ -7501,14 +7517,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           fence,
           resumeCheckpoint,
           heldForTakeover,
-          retryForever ? null : "Run setup failed; retrying",
+          normalizedError,
         );
         if (released) {
           await deps.prisma.attempt.update({
             where: { id: attempt.id },
             data: {
               status: "setup_failed",
-              error: retryForever ? null : "Run setup failed; retrying",
+              error: normalizedError,
               finishedAt: new Date(),
             },
           });
@@ -7519,7 +7535,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
             return;
           }
-          throw new Error("Run setup failed; retrying");
+          throw new Error(normalizedError);
         }
       } finally {
         detachShutdown?.();

@@ -130,8 +130,23 @@ jobs:
             test-report/e2e
           retention-days: 7
           if-no-files-found: warn
+      - name: Warn that Playwright report publishing is not configured
+        if: >-
+          always() && inputs.publish_report &&
+          (secrets.S3_ACCESS_KEY_ID == '' || secrets.S3_SECRET_ACCESS_KEY == '' ||
+           vars.S3_BUCKET == '' || vars.S3_ENDPOINT == '' || vars.PLAYWRIGHT_PUBLIC_BASE_URL == '')
+        run: echo "::warning::Skipping Playwright report publish - set Secrets S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY plus Variables S3_BUCKET, S3_ENDPOINT, S3_REGION and PLAYWRIGHT_PUBLIC_BASE_URL to enable it."
       - name: Publish Playwright visual report
-        if: always() && inputs.publish_report
+        # Publishing to the visual dashboard is opt-in per repository: it
+        # needs repo Secrets S3_ACCESS_KEY_ID + S3_SECRET_ACCESS_KEY and
+        # Variables S3_BUCKET, S3_ENDPOINT, S3_REGION and
+        # PLAYWRIGHT_PUBLIC_BASE_URL. Without them, skip with a warning
+        # instead of failing an otherwise healthy run; the publish scripts
+        # keep their strict env validation for direct use.
+        if: >-
+          always() && inputs.publish_report &&
+          secrets.S3_ACCESS_KEY_ID != '' && secrets.S3_SECRET_ACCESS_KEY != '' &&
+          vars.S3_BUCKET != '' && vars.S3_ENDPOINT != '' && vars.PLAYWRIGHT_PUBLIC_BASE_URL != ''
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}

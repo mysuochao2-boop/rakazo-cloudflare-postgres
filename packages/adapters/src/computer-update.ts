@@ -1,4 +1,5 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
+import { COMPUTER_BOOTING_EXPIRE_MS } from "./computer-lifecycle.js";
 import { computerControlExpireJobKey } from "@rakazo/adapter-kit";
 import { type ComputerUpdate, ComputerUpdateSchema } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
@@ -663,5 +664,35 @@ export async function reconcileComputerUpdates(deps: Pick<Deps, "prisma" | "jobs
         if (stale.count !== 1) return;
       });
     }
+  }
+  try {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - COMPUTER_BOOTING_EXPIRE_MS);
+    const candidates = await deps.prisma.computer.findMany({
+      where: { state: "booting", updatedAt: { lte: cutoff } },
+      select: { id: true },
+    });
+    for (const candidate of candidates) {
+      const hasLiveLease = await deps.prisma.computerExecutionLease.findFirst({
+        where: { computerId: candidate.id, expiresAt: { gt: now } },
+        select: { id: true },
+      });
+      if (hasLiveLease) continue;
+      const hasLiveRun = await deps.prisma.run.findFirst({
+        where: {
+          status: { in: [...ACTIVE_RUN_STATUSES] },
+          bot: { computerId: candidate.id },
+          leaseExpiresAt: { gt: now },
+        },
+        select: { id: true },
+      });
+      if (hasLiveRun) continue;
+      await deps.prisma.computer.updateMany({
+        where: { id: candidate.id, state: "booting" as const },
+        data: { state: "error" as const, updatedAt: now },
+      });
+    }
+  } catch (error) {
+    getLogger().error("stuck booting computer expiry", error);
   }
 }

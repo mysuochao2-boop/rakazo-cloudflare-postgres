@@ -189,6 +189,16 @@ export function createJobReconciler(
                     status: { in: ["leased", "running"] },
                     leaseExpiresAt: { lte: now },
                   },
+                  // Safety net for the cloud-mail incident: a run whose
+                  // worker keeps requeueing with updatedAt advancing but
+                  // never leaves queued due to ComputerBusy/setup failure
+                  // gets fenced very high (fence 2729). GC it here once its
+                  // updatedAt is old enough and fence exceeds the executor cap.
+                  {
+                    status: "queued",
+                    updatedAt: { lte: new Date(now.getTime() - 30 * 60_000) },
+                    leaseFence: { gte: 50 },
+                  },
                 ],
               },
               ...(runCursorFilter ? [runCursorFilter] : []),
@@ -196,7 +206,7 @@ export function createJobReconciler(
           },
           orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
           take: batchSize,
-          select: { id: true, updatedAt: true },
+          select: { id: true, updatedAt: true, status: true, leaseFence: true, leaseExpiresAt: true },
         }),
         deps.prisma.routine.findMany({
           where: {

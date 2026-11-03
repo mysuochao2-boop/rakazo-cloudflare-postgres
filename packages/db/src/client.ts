@@ -25,6 +25,17 @@ export function createPool(connectionString: string, options: DbClientOptions = 
     idleTimeoutMillis: 0,
     application_name: options.applicationName,
     keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    // Checkout timeout alone does not protect a query already in flight on a
+    // checked-out client: a wedged (half-dead) connection would hold it
+    // forever, and a handful of those exhaust this small pool for every
+    // later query. statement_timeout lets Postgres abort a statement that
+    // runs past 15s; query_timeout is the client-side backstop that also
+    // fires when the server never answers at all; idle-in-transaction aborts
+    // a transaction left hanging mid-flight.
+    statement_timeout: 15_000,
+    query_timeout: 20_000,
+    idle_in_transaction_session_timeout: 60_000,
   });
   // graphile-worker (and Node itself) require an 'error' listener on a shared
   // pool: an idle-client disconnect is otherwise an unhandled error that kills
