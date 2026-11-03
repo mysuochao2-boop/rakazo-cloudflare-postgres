@@ -83,6 +83,26 @@ describe("BotRuntimeContainer async dispatch", () => {
     expect(f.stored.get("pendingRuns")).toEqual([]);
   });
 
+  it("drains durable pending work when a warm request recovers the runtime", async () => {
+    const f = fixture([202]);
+    f.stored.set("botId", "bot-1");
+    f.stored.set("pendingRuns", [
+      { runId: "run-recovered", acceptedAt: Date.now(), attempts: 1 },
+    ]);
+
+    const response = await f.runtime.fetch(
+      new Request("https://runtime.internal/warm", {
+        method: "POST",
+        headers: { "x-rakazo-bot-id": "bot-1" },
+      }),
+    );
+
+    expect(response.status).toBe(204);
+    await Promise.all(f.waits);
+    expect(forwards(f.continueFetch.mock.calls)).toBe(1);
+    expect(f.stored.get("pendingRuns")).toEqual([]);
+  });
+
   it("does not let a busy background lane block an interactive run queued behind it", async () => {
     // bg-1 is rejected (background lane full); int-1 behind it must still be delivered.
     const f = fixture([{ status: 409, lane: "background" }, 202]);
